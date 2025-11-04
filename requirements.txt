@@ -1,4 +1,4 @@
 streamlit
 pandas
-pyproj
+pyproj==3.6.1
 openpyxl
