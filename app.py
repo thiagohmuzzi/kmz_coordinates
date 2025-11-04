@@ -8,7 +8,7 @@ import os
 GRID = "TO27CSv1.gsb"  # keep this file in the same folder as app.py
 
 st.set_page_config(page_title="Toronto Grid Coordinate Converter", page_icon="📍")
-st.title("KMZ Coordinates.xlsx NAD83 Geographic / NAD27 UTM 17N Toronto grid")
+st.title("KMZ Coordinates.xlsx NAD83 Geographic / NAD27 UTM 17N Toronto")
 
 up = st.file_uploader("Upload KMZ or KML", type=["kmz","kml"])
 
