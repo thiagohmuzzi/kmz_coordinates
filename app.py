@@ -16,6 +16,7 @@ os.environ["PROJ_NETWORK"] = "OFF"  # avoid network fetch; we have the file
 
 st.set_page_config(page_title="Toronto Grid Coordinate Converter", page_icon="📍")
 st.title("KMZ Coordinates.xlsx NAD83 Geographic / NAD27 UTM 17N Toronto")
+st.caption("Transformation: NAD83 → NAD27 / UTM Zone 17N  •  Grid used: TO27CSv1.gsb")
 
 up = st.file_uploader("Upload KMZ or KML", type=["kmz","kml"])
 
