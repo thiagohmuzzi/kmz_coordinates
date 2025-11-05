@@ -5,7 +5,7 @@ from xml.sax.saxutils import escape
 from pathlib import Path
 
 st.title("Excel (UTM) to KMZ")
-st.caption("Input: NAD27 UTM Zone 17N • Grid used: TO27CSv1.gsb)
+st.caption("Input: NAD27 UTM Zone 17N • Grid used: TO27CSv1.gsb")
 
 GRID = Path(__file__).parent / "TO27CSv1.gsb"
 if not GRID.exists():
