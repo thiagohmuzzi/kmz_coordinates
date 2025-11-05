@@ -7,18 +7,16 @@ import os
 from pathlib import Path
 import numpy as np
 
-# --- Resolve absolute paths to grid files ---
 APP_DIR = Path(__file__).parent.resolve()
 TOR_GRID = APP_DIR / "TO27CSv1.gsb"   # default (Toronto)
 ON_GRID  = APP_DIR / "ON27CSv1.gsb"   # fallback (Ontario-wide)
 
-# Ensure PROJ uses local grids only
 os.environ["PROJ_DATA"] = str(APP_DIR)
 os.environ["PROJ_NETWORK"] = "OFF"
 
 st.set_page_config(page_title="Toronto Grid Coordinate Converter", page_icon="📍")
 st.title("KMZ Coordinates.xlsx NAD83 Geographic → NAD27 / UTM 17N")
-st.caption("Default grid: TO27CSv1.gsb  •  Fallback on outside coverage: ON27CSv1.gsb")
+st.caption("Default grid: TO27CSv1.gsb • Fallback if outside coverage: ON27CSv1.gsb")
 
 up = st.file_uploader("Upload KMZ or KML", type=["kmz","kml"])
 
@@ -55,6 +53,13 @@ def transformer_for(grid_path: Path) -> Transformer:
     )
     return Transformer.from_pipeline(pipeline)
 
+def invalid_mask(E: pd.Series, N: pd.Series) -> pd.Series:
+    # Treat as invalid if NaN OR outside plausible UTM17N ranges
+    m = E.isna() | N.isna()
+    m |= ~E.between(100000, 900000)            # broad UTM eastings
+    m |= ~N.between(4_300_000, 5_800_000)      # generous northing band around Ontario
+    return m
+
 if up and st.button("Convert"):
     try:
         # Read KML bytes
@@ -69,43 +74,52 @@ if up and st.button("Convert"):
         if df.empty:
             st.error("No coordinates found."); st.stop()
 
-        # Default transform with Toronto grid
+        # Toronto first
         t_tor = transformer_for(TOR_GRID)
         E_tor, N_tor = t_tor.transform(df["lon_4269"].to_numpy(), df["lat_4269"].to_numpy())
         E = pd.Series(E_tor, dtype="float64")
         N = pd.Series(N_tor, dtype="float64")
 
-        # Identify rows outside coverage (pyproj returns NaN when grid not applicable)
-        mask_missing = E.isna() | N.isna()
+        used_grid = np.full(len(df), "TO27CSv1.gsb", dtype=object)
 
-        used_grid = np.where(mask_missing, "ON27CSv1.gsb", "TO27CSv1.gsb")
+        # Detect outside-coverage/malformed results
+        bad = invalid_mask(E, N)
 
-        # Fallback only for the rows that failed on Toronto grid
-        if mask_missing.any():
+        # Fallback only for invalid rows
+        if bad.any():
             t_on = transformer_for(ON_GRID)
             E_on, N_on = t_on.transform(
-                df.loc[mask_missing, "lon_4269"].to_numpy(),
-                df.loc[mask_missing, "lat_4269"].to_numpy()
+                df.loc[bad, "lon_4269"].to_numpy(),
+                df.loc[bad, "lat_4269"].to_numpy()
             )
-            # insert fallback results
-            E.loc[mask_missing] = E_on
-            N.loc[mask_missing] = N_on
-            st.warning(f"Applied fallback grid (ON27CSv1.gsb) for {mask_missing.sum()} point(s).")
+            E.loc[bad] = E_on
+            N.loc[bad] = N_on
+
+            # Recheck after fallback
+            still_bad = invalid_mask(E.loc[bad], N.loc[bad])
+            used_grid[bad.values] = "ON27CSv1.gsb"
+            if still_bad.any():
+                # mark rows that remain invalid after fallback
+                idxs = still_bad[still_bad].index
+                used_grid[idxs] = "None"
+                st.warning(f"{still_bad.sum()} point(s) remain invalid after fallback (outside UTM17N or corrupt).")
+
+            st.info(f"Applied fallback grid (ON27CSv1.gsb) for {bad.sum()} point(s).")
 
         # Assemble output
         out = df[["feature_name","vertex_index","lat_4269","lon_4269"]].copy()
         out["N_26717"] = N
         out["E_26717"] = E
-        # rounding
         out["lat_4269"] = out["lat_4269"].round(6)
         out["lon_4269"] = out["lon_4269"].round(6)
         out["N_26717"] = out["N_26717"].round(3)
         out["E_26717"] = out["E_26717"].round(3)
-        # keep elevation and add grid_used AFTER elevation
+
+        # keep elevation then grid_used immediately after
         out["elevation_m"] = df["elevation_m"]
         out["grid_used"] = used_grid
 
-        # Excel output
+        # Excel output with header row
         wb = Workbook(); ws = wb.active; ws.title = "Coordinates"
         ws.append(["", "",
                    "NAD 83 Geographic", "NAD 83 Geographic",
@@ -126,5 +140,5 @@ if up and st.button("Convert"):
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
-        st.error("Transformation failed. Ensure grid files exist in repo root (TO27CSv1.gsb, ON27CSv1.gsb).")
+        st.error("Transformation failed. Confirm grid files exist in repo root (TO27CSv1.gsb, ON27CSv1.gsb).")
         st.exception(e)
