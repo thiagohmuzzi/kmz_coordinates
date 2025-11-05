@@ -65,13 +65,13 @@ if up and btn:
     if z_col: df[z_col] = pd.to_numeric(df[z_col], errors="coerce")
     df = df.dropna(subset=[e_col,n_col]).copy()
 
-pipeline = (
-    f"+proj=pipeline "
-    f"+step +inv +proj=utm +zone=17 +datum=NAD27 "
-    f"+step +proj=hgridshift +grids={GRID_PATH} "
-    f"+step +proj=unitconvert +xy_in=rad +xy_out=deg"
-)
-transformer = Transformer.from_pipeline(pipeline)
+    pipeline = (
+        f"+proj=pipeline "
+        f"+step +inv +proj=utm +zone=17 +datum=NAD27 "
+        f"+step +proj=hgridshift +grids={GRID_PATH} "
+        f"+step +proj=unitconvert +xy_in=rad +xy_out=deg"
+    )
+    transformer = Transformer.from_pipeline(pipeline)
 
     lon, lat = tr.transform(df[e_col].to_numpy(), df[n_col].to_numpy())
     df["lon_4269"] = lon; df["lat_4269"] = lat
