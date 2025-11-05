@@ -4,6 +4,32 @@ from pyproj import Transformer
 from xml.sax.saxutils import escape
 from pathlib import Path
 
+# --- Locate Toronto grid file robustly ---
+from pathlib import Path
+import os
+import streamlit as st
+
+APP_DIR = Path(__file__).parent.resolve()
+
+# Search common locations (repo root, /pages/, working dir)
+CANDIDATES = [
+    APP_DIR / "TO27CSv1.gsb",
+    APP_DIR.parent / "TO27CSv1.gsb",
+    Path.cwd() / "TO27CSv1.gsb",
+    APP_DIR.parent.parent / "TO27CSv1.gsb",
+]
+
+GRID = next((p for p in CANDIDATES if p.exists()), None)
+if GRID is None:
+    st.error("TO27CSv1.gsb not found. Place it at repo root or next to this app file.")
+    st.stop()
+
+# Register for PROJ
+os.environ["PROJ_DATA"] = str(GRID.parent)
+os.environ["PROJ_NETWORK"] = "OFF"
+GRID_PATH = str(GRID)
+
+
 st.title("Excel (UTM) to KMZ")
 st.caption("Input: NAD27 UTM Zone 17N • Grid used: TO27CSv1.gsb")
 
@@ -39,13 +65,14 @@ if up and btn:
     if z_col: df[z_col] = pd.to_numeric(df[z_col], errors="coerce")
     df = df.dropna(subset=[e_col,n_col]).copy()
 
-    pipeline = (
-        f"+proj=pipeline "
-        f"+step +inv +proj=utm +zone=17 +datum=NAD27 "
-        f"+step +proj=hgridshift +grids={GRID} "
-        f"+step +proj=unitconvert +xy_in=rad +xy_out=deg"
-    )
-    tr = Transformer.from_pipeline(pipeline)
+pipeline = (
+    f"+proj=pipeline "
+    f"+step +inv +proj=utm +zone=17 +datum=NAD27 "
+    f"+step +proj=hgridshift +grids={GRID_PATH} "
+    f"+step +proj=unitconvert +xy_in=rad +xy_out=deg"
+)
+transformer = Transformer.from_pipeline(pipeline)
+
     lon, lat = tr.transform(df[e_col].to_numpy(), df[n_col].to_numpy())
     df["lon_4269"] = lon; df["lat_4269"] = lat
     df["grid_status"] = np.where(df[["lon_4269","lat_4269"]].isna().any(axis=1),
