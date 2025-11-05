@@ -6,7 +6,7 @@ from pyproj import Transformer
 from xml.sax.saxutils import escape
 
 st.set_page_config(page_title="Excel → KMZ (Toronto grid)", page_icon="🗂️")
-st.title("Excel → KMZ (folders) — NAD83 Geographic via Toronto NTv2 grid")
+st.title("Excel to KMZ")
 
 # --- Locate Toronto grid file robustly ---
 APP_DIR = Path(__file__).parent.resolve()
