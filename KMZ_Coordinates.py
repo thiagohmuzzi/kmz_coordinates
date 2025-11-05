@@ -15,7 +15,7 @@ os.environ["PROJ_DATA"] = str(APP_DIR)
 os.environ["PROJ_NETWORK"] = "OFF"
 
 st.set_page_config(page_title="Toronto Grid Coordinate Converter", page_icon="📍")
-st.title("KMZ Coordinates → Excel (Toronto & Ontario Grids)")
+st.title("KMZ Coordinates to Excel (NAD83 Geographic / NAD27 UTM Zone 17N")
 st.caption("Default grid: TO27CSv1.gsb • Fallback if outside coverage: ON27CSv1.gsb")
 
 up = st.file_uploader("Upload KMZ or KML", type=["kmz","kml"])
