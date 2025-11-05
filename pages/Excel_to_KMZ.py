@@ -1,5 +1,5 @@
-# Excel → KMZ (mixed inputs: NAD83 lat/long OR NAD27/UTM17N)
-# Toronto grid default with Ontario fallback per-row; closed polylines by feature_name
+# Excel → KMZ (NAD83 lat/long OR NAD27/UTM17N)
+# Toronto grid default with Ontario fallback per-row; closed polylines by feature_name; KMZ + Validation Excel
 import os
 import zipfile
 from io import BytesIO
@@ -15,32 +15,30 @@ from xml.sax.saxutils import escape
 st.set_page_config(page_title="Excel → KMZ", page_icon="🗂️")
 st.title("Excel to KMZ")
 
-# --- Grids: resolve robustly (works whether file is at repo root or alongside this page) ---
+# ---------- Resolve grids: assume grids live in REPO ROOT ----------
 THIS = Path(__file__).resolve()
+# If this file is in /pages, ROOT is the repo root. Else use its parent.
 ROOT = THIS.parents[1] if THIS.parent.name == "pages" else THIS.parent
 
-TOR_GRID = next((p for p in [
-    ROOT / "TO27CSv1.gsb",
-    THIS.parent / "TO27CSv1.gsb",
-    Path.cwd() / "TO27CSv1.gsb",
-] if p.exists()), None)
+TOR_GRID = ROOT / "TO27CSv1.gsb"
+ON_GRID  = ROOT / "ON27CSv1.gsb"
 
-ON_GRID = next((p for p in [
-    ROOT / "ON27CSv1.gsb",
-    THIS.parent / "ON27CSv1.gsb",
-    Path.cwd() / "ON27CSv1.gsb",
-] if p.exists()), None)
+tor_exists = TOR_GRID.exists()
+on_exists  = ON_GRID.exists()
 
 st.caption(
     "Input rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). "
-    "For UTM rows, the app applies **Toronto grid (TO27CSv1.gsb)** by default; if a point is outside that grid, "
+    "UTM rows use **Toronto grid (TO27CSv1.gsb)** by default; if a point is outside that coverage, "
     "**Ontario grid (ON27CSv1.gsb)** is used as fallback."
 )
 
-# Ensure PROJ can find the grids; disable network grids
-for g in [TOR_GRID, ON_GRID]:
-    if g:
-        os.environ["PROJ_DATA"] = str(g.parent.resolve())
+# Show grid availability to avoid silent failures
+with st.expander("Grid files status", expanded=False):
+    st.write(f"Toronto grid: `{TOR_GRID}` — **{'FOUND' if tor_exists else 'MISSING'}**")
+    st.write(f"Ontario grid: `{ON_GRID}` — **{'FOUND' if on_exists else 'MISSING'}**")
+
+# Ensure PROJ finds our local grids; disable network grids
+os.environ["PROJ_DATA"] = str(ROOT.resolve())
 os.environ["PROJ_NETWORK"] = "OFF"
 
 # ---------------------- Template download ----------------------
@@ -74,12 +72,17 @@ def invalid_ll(lon_series: pd.Series, lat_series: pd.Series) -> pd.Series:
     """Invalid if NaN, ±inf, or out of global lat/lon bounds."""
     bad = ~np.isfinite(lon_series) | ~np.isfinite(lat_series)
     bad |= ~lon_series.between(-180.0, 180.0) | ~lat_series.between(-90.0, 90.0)
-    # Optional: tighten to Ontario vicinity
-    # bad |= ~lon_series.between(-96.0, -72.0) | ~lat_series.between(41.0, 57.0)
     return bad
 
-def transformer_for(grid_path: Path) -> Transformer:
-    # NAD27/UTM17N -> NAD83 geographic (degrees)
+def transformer_for_nad27utm17_to_nad83_ll(grid_path: Path) -> Transformer:
+    """
+    Input: NAD27 / UTM Zone 17N (meters)
+    Output: NAD83 geographic (degrees)
+    Steps:
+      1) inverse UTM17 (to NAD27 geographic, radians)
+      2) apply NTv2 grid shift (NAD27->NAD83), radians
+      3) convert to degrees
+    """
     pipe = (
         f"+proj=pipeline "
         f"+step +inv +proj=utm +zone=17 +datum=NAD27 "
@@ -98,7 +101,7 @@ if st.button("Convert"):
         if df0.empty:
             st.error("No rows found."); st.stop()
 
-        # Normalize headers to snake_case
+        # Normalize headers
         df = df0.copy()
         df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
 
@@ -122,11 +125,14 @@ if st.button("Convert"):
             if c and c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
 
-        # Transformers
-        tr_tor = transformer_for(TOR_GRID) if TOR_GRID else None
-        tr_on  = transformer_for(ON_GRID)  if ON_GRID  else None
+        # Build transformers (error explicitly if Toronto grid missing and UTM provided)
+        tr_tor = transformer_for_nad27utm17_to_nad83_ll(TOR_GRID) if tor_exists else None
+        tr_on  = transformer_for_nad27utm17_to_nad83_ll(ON_GRID)  if on_exists  else None
 
-        # Prepare output frame
+        if (col_n and col_e) and (not tr_tor):
+            st.error(f"Toronto grid not found at {TOR_GRID}. Place TO27CSv1.gsb in the repo root."); st.stop()
+
+        # Prepare output dataframe
         out = pd.DataFrame(index=df.index)
         out["folder"] = df[col_folder] if col_folder in df.columns else ""
         out["feature_name"] = df[col_name]
@@ -146,11 +152,11 @@ if st.button("Convert"):
             out.loc[m_latlon, "grid_used"] = "input_latlon"
             out.loc[m_latlon, "input_type"] = "latlon"
 
-        # Case B: UTM N/E (NAD27/UTM17N) → NAD83 lat/lon
+        # Case B: UTM N/E (NAD27/UTM17N) → NAD83 lat/lon with fallback
         if col_n and col_e and tr_tor:
             m_utm = df[col_n].notna() & df[col_e].notna()
             if m_utm.any():
-                # Toronto first
+                # 1) Toronto first
                 lon_t, lat_t = tr_tor.transform(
                     df.loc[m_utm, col_e].to_numpy(),
                     df.loc[m_utm, col_n].to_numpy()
@@ -160,27 +166,37 @@ if st.button("Convert"):
 
                 bad = invalid_ll(lon_t, lat_t)
 
-                # Fallback to Ontario for invalid rows
-                if bad.any() and tr_on:
-                    lon_o, lat_o = tr_on.transform(
-                        df.loc[bad, col_e].to_numpy(),
-                        df.loc[bad, col_n].to_numpy()
-                    )
-                    lon_o = pd.Series(lon_o, index=df.loc[bad].index, dtype="float64")
-                    lat_o = pd.Series(lat_o, index=df.loc[bad].index, dtype="float64")
+                # 2) Fallback to Ontario grid (only for bad rows)
+                if bad.any():
+                    if not tr_on:
+                        # Surface the issue clearly to the user
+                        st.warning(
+                            f"Ontario fallback grid missing at {ON_GRID}. "
+                            f"{bad.sum()} point(s) outside Toronto could not be corrected."
+                        )
+                    else:
+                        lon_o, lat_o = tr_on.transform(
+                            df.loc[bad, col_e].to_numpy(),
+                            df.loc[bad, col_n].to_numpy()
+                        )
+                        lon_o = pd.Series(lon_o, index=df.loc[bad].index, dtype="float64")
+                        lat_o = pd.Series(lat_o, index=df.loc[bad].index, dtype="float64")
 
-                    lon_t.loc[bad] = lon_o
-                    lat_t.loc[bad] = lat_o
+                        # overwrite with fallback results
+                        lon_t.loc[bad] = lon_o
+                        lat_t.loc[bad] = lat_o
 
-                    # mark grids
-                    out.loc[m_utm & ~bad, "grid_used"] = "TO27CSv1.gsb"
-                    out.loc[bad, "grid_used"] = "ON27CSv1.gsb"
+                        # recompute invalid after fallback
+                        bad_after = invalid_ll(lon_t.loc[bad], lat_t.loc[bad])
 
-                    # If some still invalid after fallback, mark them None
-                    bad_after = invalid_ll(lon_t.loc[bad], lat_t.loc[bad])
-                    if bad_after.any():
-                        out.loc[bad_after.index[bad_after], "grid_used"] = "None"
+                        # label grids used
+                        out.loc[m_utm, "grid_used"] = "TO27CSv1.gsb"  # default
+                        out.loc[bad, "grid_used"] = "ON27CSv1.gsb"    # fallback
+                        if bad_after.any():
+                            out.loc[bad_after.index[bad_after], "grid_used"] = "None"
+                    # If no Ontario grid available, leave grid_used for bad rows as empty; will be dropped below.
                 else:
+                    # everything valid with Toronto
                     out.loc[m_utm, "grid_used"] = "TO27CSv1.gsb"
 
                 out.loc[m_utm, "lat"] = lat_t
@@ -238,10 +254,10 @@ if st.button("Convert"):
         kml = BytesIO()
         kml.write(kml_header(f"{base} — NAD83 Geographic").encode("utf-8"))
 
+        # Group: folder → feature_name
         folder_series = out["folder"].fillna("").astype(str) if "folder" in out.columns else pd.Series([""]*len(out), index=out.index)
         elev_series = out["elevation"] if "elevation" in out.columns else pd.Series([np.nan]*len(out), index=out.index)
 
-        # Group: folder → feature_name; build closed polylines for multi-vertex features
         for folder_name, g_folder in out.groupby(folder_series):
             if folder_name:
                 kml.write(kml_folder(folder_name).encode("utf-8"))
@@ -304,7 +320,6 @@ if st.button("Convert"):
             file_name=f"{base}_Validation.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-
         st.dataframe(out_valid, use_container_width=True)
 
     except Exception as e:
