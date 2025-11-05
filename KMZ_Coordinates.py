@@ -105,9 +105,10 @@ if up and st.button("Convert"):
 
         # Excel output with simplified header
         wb = Workbook(); ws = wb.active; ws.title = "Coordinates"
-        ws.append(["", "", "Latitude / Longitude (NAD83)", "Latitude / Longitude (NAD83)",
+        ws.append(["", "", "NAD83 Geographic", "NAD83 Geographic",
                    "UTM Zone 17N (NAD27)", "UTM Zone 17N (NAD27)", "", ""])
         ws.append(["feature_name","vertex_index","lat","lon","N","E","elevation_m","grid_used"])
+
         for r in dataframe_to_rows(out, index=False, header=False):
             ws.append(r)
 
