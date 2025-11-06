@@ -50,7 +50,7 @@ st.download_button(
 
 # -------- upload --------
 up = st.file_uploader(
-    "Upload Excel (columns may include: folder, feature_name, lat, long, N, E, elevation — others are preserved)",
+    "Upload Excel (columns may include: folder, feature_name, lat, long, N, E, elevation)",
     type=["xlsx", "xls"],
 )
 
