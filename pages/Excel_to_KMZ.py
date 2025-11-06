@@ -11,7 +11,7 @@ import streamlit as st
 from pyproj import Transformer
 from xml.sax.saxutils import escape
 
-st.set_page_config(page_title="Excel → KMZ", page_icon="🗂️")
+st.set_page_config(page_title="Excel → KMZ", page_icon="🌎")
 st.title("Excel to KMZ")
 
 # ---------- Resolve grids in REPO ROOT ----------
