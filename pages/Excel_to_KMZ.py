@@ -282,11 +282,16 @@ if st.session_state.kmz_bytes and st.session_state.validation_xlsx:
         key="dl_xlsx",
     )
 
-    # --- fix: use st.rerun via on_click callback ---
-    def _refresh():
+    # Queue a rerun instead of calling st.rerun() inside the callback
+    def _queue_refresh():
         for k in ("kmz_bytes", "validation_xlsx", "base_name"):
             st.session_state.pop(k, None)
-        st.rerun()  # replaces st.experimental_rerun()
+        st.session_state["_do_rerun"] = True
 
-    st.button("Refresh / New conversion", on_click=_refresh, type="secondary")
+    st.button("Refresh / New conversion", on_click=_queue_refresh, type="secondary")
+
+# Perform the rerun outside of any callback (prevents the yellow warning)
+if st.session_state.get("_do_rerun"):
+    st.session_state.pop("_do_rerun", None)
+    st.rerun()
 
