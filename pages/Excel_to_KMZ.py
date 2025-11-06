@@ -27,7 +27,7 @@ os.environ["PROJ_NETWORK"] = "OFF"
 st.caption(
     "Input coordinates to the excel template provided. Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). "
     "Folder information is optional and can be provided if desired to have the features nested in separate folders for Google Earth. "
-    "Coordinate transformation applies the Toronto grid (TO27CSv1.gsb) by default; Ontario grid (ON27CSv1.gsb) is used as fallback if coordinates fall outside the default grid coverage."
+    "Coordinate transformation applies Toronto grid (TO27CSv1.gsb) by default; Ontario grid (ON27CSv1.gsb) is used as fallback if coordinates are outside the default grid coverage."
 )
 
 # ---------------------- Template download ----------------------
