@@ -14,7 +14,7 @@ ON_GRID  = APP_DIR / "ON27CSv1.gsb"   # fallback (Ontario-wide)
 os.environ["PROJ_DATA"] = str(APP_DIR)
 os.environ["PROJ_NETWORK"] = "OFF"
 
-st.set_page_config(page_title="Toronto Grid Coordinate Converter", page_icon="📍")
+st.set_page_config(page_title="KMZ Coordinates Extraction", page_icon="🧭")
 st.title("KMZ Coordinates to Excel - NAD83 Geographic / NAD27 UTM Zone 17N")
 st.caption("Default grid: TO27CSv1.gsb • Fallback if outside coverage: ON27CSv1.gsb")
 
