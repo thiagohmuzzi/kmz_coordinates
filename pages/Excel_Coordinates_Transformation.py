@@ -30,7 +30,7 @@ os.environ["PROJ_NETWORK"] = "OFF"
 
 st.caption(
     "Input coordinates to the excel template provided. Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). "
-    "Folder information is optional and can be ignored or kept if using the same file for *Excel to KMZ* conversion. "
+    "Folder information and elevations are optional and can be ignored or kept if using the same file for *Excel to KMZ* conversion. "
     "Coordinate transformation applies Toronto grid (TO27CSv1.gsb) by default; Ontario grid (ON27CSv1.gsb) is used as fallback if coordinates are outside the default grid coverage."
 )
 
