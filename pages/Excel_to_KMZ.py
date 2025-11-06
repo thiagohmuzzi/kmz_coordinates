@@ -281,9 +281,12 @@ if st.session_state.kmz_bytes and st.session_state.validation_xlsx:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="dl_xlsx",
     )
-    if st.button("Refresh / New conversion"):
-        # Clear only outputs; keep the upload widget displayed
-        st.session_state.kmz_bytes = None
-        st.session_state.validation_xlsx = None
-        st.session_state.base_name = None
-        st.experimental_rerun()
+
+    # --- fix: use st.rerun via on_click callback ---
+    def _refresh():
+        for k in ("kmz_bytes", "validation_xlsx", "base_name"):
+            st.session_state.pop(k, None)
+        st.rerun()  # replaces st.experimental_rerun()
+
+    st.button("Refresh / New conversion", on_click=_refresh, type="secondary")
+
