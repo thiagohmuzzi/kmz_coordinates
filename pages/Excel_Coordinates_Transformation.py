@@ -15,7 +15,7 @@ import pandas as pd
 import streamlit as st
 from pyproj import Transformer
 
-st.set_page_config(page_title="Excel Coordinate Transformation", page_icon="📄")
+st.set_page_config(page_title="Excel Coordinates Transformation", page_icon="📄")
 st.title("Excel Coordinate Transformation")
 
 # -------- repo root & grids --------
