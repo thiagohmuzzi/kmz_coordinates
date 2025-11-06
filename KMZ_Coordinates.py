@@ -11,6 +11,7 @@ import streamlit as st
 from pyproj import Transformer
 from xml.sax.saxutils import escape
 
+st.warning("Excel→KMZ page build: 2025-11-06 v4  (file: pages/Excel_to_KMZ_Ontario.py)")
 st.set_page_config(page_title="Excel → KMZ", page_icon="🗂️")
 st.title("Excel to KMZ")
 
