@@ -1,5 +1,5 @@
 # Excel → KMZ (NAD83 lat/long OR NAD27/UTM17N)
-# Toronto grid default with Ontario fallback per-row; POINTS ONLY; KMZ + Validation Excel
+# Toronto grid default with Ontario fallback per-row; POINTS ONLY; KMZ + Validation Excel; persistent downloads
 import os
 import zipfile
 from io import BytesIO
@@ -10,7 +10,6 @@ import pandas as pd
 import streamlit as st
 from pyproj import Transformer
 from xml.sax.saxutils import escape
-
 
 st.set_page_config(page_title="Excel → KMZ", page_icon="🗂️")
 st.title("Excel to KMZ")
@@ -80,10 +79,10 @@ def transformer_for_nad27utm17_to_nad83_ll(grid_path: Path) -> Transformer:
     )
     return Transformer.from_pipeline(pipe)
 
-def build_kmz_from_points(doc_name: str, rows: pd.DataFrame) -> bytes:
+def build_kmz_points(doc_name: str, rows: pd.DataFrame) -> bytes:
     """
-    rows columns expected: folder, feature_name, lon, lat, elevation (optional)
-    Every row becomes a Point Placemark. If folder blank/NaN → placed at Document level.
+    rows expected: folder, feature_name, lon, lat, elevation(optional)
+    Each row -> Point Placemark. Blank folder => placed at Document level.
     """
     def kml_header(name):
         return ('<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -102,7 +101,6 @@ def build_kmz_from_points(doc_name: str, rows: pd.DataFrame) -> bytes:
     kml = BytesIO()
     kml.write(kml_header(doc_name).encode("utf-8"))
 
-    # group by folder (blank or NaN => no folder)
     folders = rows["folder"].fillna("").astype(str) if "folder" in rows.columns else pd.Series([""]*len(rows), index=rows.index)
     elev = rows["elevation"] if "elevation" in rows.columns else pd.Series([np.nan]*len(rows), index=rows.index)
 
@@ -124,10 +122,10 @@ def build_kmz_from_points(doc_name: str, rows: pd.DataFrame) -> bytes:
     kmz.seek(0)
     return kmz.getvalue()
 
-# ---------------------- main ----------------------
-# Use session_state to persist results for multiple downloads
-for key in ["kmz_bytes", "validation_xlsx", "base_name"]:
-    st.session_state.setdefault(key, None)
+# ---------------------- session persistence ----------------------
+for key in ("kmz_bytes", "validation_xlsx", "base_name"):
+    if key not in st.session_state:
+        st.session_state[key] = None
 
 convert_clicked = st.button("Convert") if up else False
 
@@ -152,7 +150,6 @@ if convert_clicked and up:
             if col_name is None:
                 st.error("Missing required column: feature_name")
             else:
-                # Keep relevant columns only
                 keep = [c for c in [col_folder,col_name,col_lat,col_lon,col_n,col_e,col_z] if c]
                 df = df[keep].copy()
 
@@ -161,11 +158,11 @@ if convert_clicked and up:
                     if c and c in df.columns:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-                # Transformers
+                # Transformers (build only if grids exist)
                 tr_tor = transformer_for_nad27utm17_to_nad83_ll(TOR_GRID) if TOR_GRID.exists() else None
                 tr_on  = transformer_for_nad27utm17_to_nad83_ll(ON_GRID)  if ON_GRID.exists()  else None
 
-                # Prepare output frame
+                # Output frame
                 out = pd.DataFrame(index=df.index)
                 out["folder"] = df[col_folder] if col_folder in df.columns else ""
                 out["feature_name"] = df[col_name]
@@ -177,7 +174,7 @@ if convert_clicked and up:
                 out["grid_used"] = ""
                 out["input_type"] = ""
 
-                # Case A: explicit NAD83 lat/long
+                # A) explicit NAD83 lat/long
                 if col_lat and col_lon:
                     m_latlon = df[col_lat].notna() & df[col_lon].notna()
                     out.loc[m_latlon, "lat"] = df.loc[m_latlon, col_lat]
@@ -185,11 +182,10 @@ if convert_clicked and up:
                     out.loc[m_latlon, "grid_used"] = "input_latlon"
                     out.loc[m_latlon, "input_type"] = "latlon"
 
-                # Case B: UTM N/E (NAD27/UTM17N) → NAD83 lat/lon with fallback
+                # B) NAD27/UTM17 → NAD83 lat/lon with Toronto-first & Ontario fallback
                 if col_n and col_e and tr_tor:
                     m_utm = df[col_n].notna() & df[col_e].notna()
                     if m_utm.any():
-                        # Toronto first
                         lon_t, lat_t = tr_tor.transform(
                             df.loc[m_utm, col_e].to_numpy(),
                             df.loc[m_utm, col_n].to_numpy()
@@ -199,7 +195,6 @@ if convert_clicked and up:
 
                         bad = invalid_ll(lon_t, lat_t)
 
-                        # Fallback to Ontario for invalid rows
                         if bad.any() and tr_on:
                             lon_o, lat_o = tr_on.transform(
                                 df.loc[bad, col_e].to_numpy(),
@@ -210,7 +205,6 @@ if convert_clicked and up:
                             lon_t.loc[bad] = lon_o
                             lat_t.loc[bad] = lat_o
 
-                            # After fallback, re-evaluate validity
                             bad_after = invalid_ll(lon_t.loc[bad], lat_t.loc[bad])
                             out.loc[m_utm, "grid_used"] = "TO27CSv1.gsb"
                             out.loc[bad, "grid_used"] = "ON27CSv1.gsb"
@@ -223,7 +217,7 @@ if convert_clicked and up:
                         out.loc[m_utm, "lon"] = lon_t
                         out.loc[m_utm, "input_type"] = "utm"
 
-                # Remove rows that are still invalid
+                # Remove any invalid rows
                 bad_final = invalid_ll(out["lon"], out["lat"])
                 if bad_final.any():
                     st.warning(f"{bad_final.sum()} row(s) had invalid coordinates after fallback and were skipped.")
@@ -232,17 +226,18 @@ if convert_clicked and up:
                 if out.empty:
                     st.error("No valid coordinates were found after processing.")
                 else:
-                    # Rounding for validation
+                    # Round for validation
                     out["lat"] = out["lat"].round(9)
                     out["lon"] = out["lon"].round(9)
                     if "N" in out.columns: out["N"] = out["N"].round(3)
                     if "E" in out.columns: out["E"] = out["E"].round(3)
 
-                    # Build KMZ (POINTS ONLY)
                     base = Path(up.name).stem
-                    kmz_bytes = build_kmz_from_points(f"{base} — NAD83 Geographic", out[["folder","feature_name","lon","lat","elevation"]])
 
-                    # Build Validation Excel
+                    # KMZ (POINTS ONLY)
+                    kmz_bytes = build_kmz_points(f"{base} — NAD83 Geographic", out[["folder","feature_name","lon","lat","elevation"]])
+
+                    # Validation Excel
                     valid_cols = ["folder","feature_name","lat","lon","N","E","elevation","grid_used","input_type"]
                     for c in valid_cols:
                         if c not in out.columns:
@@ -260,7 +255,7 @@ if convert_clicked and up:
                         out_valid.to_excel(xw, index=False, sheet_name="Validation")
                     xbuf.seek(0)
 
-                    # Persist to session so both downloads remain available
+                    # Persist in session so both downloads remain available
                     st.session_state.kmz_bytes = kmz_bytes
                     st.session_state.validation_xlsx = xbuf.getvalue()
                     st.session_state.base_name = base
@@ -287,7 +282,7 @@ if st.session_state.kmz_bytes and st.session_state.validation_xlsx:
         key="dl_xlsx",
     )
     if st.button("Refresh / New conversion"):
-        # Clear only outputs; keep uploaded file control intact
+        # Clear only outputs; keep the upload widget displayed
         st.session_state.kmz_bytes = None
         st.session_state.validation_xlsx = None
         st.session_state.base_name = None
