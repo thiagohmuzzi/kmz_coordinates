@@ -15,7 +15,7 @@ import streamlit as st
 from pyproj import Transformer
 
 # --- Toggle this page on/off easily ---
-PAGE_ENABLED = True  # Change between True/False to enable/disable this page
+PAGE_ENABLED = False  # Change between True/False to enable/disable this page
 if not PAGE_ENABLED:
     st.stop()
 
