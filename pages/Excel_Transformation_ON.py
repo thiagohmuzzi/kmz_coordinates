@@ -14,6 +14,11 @@ import pandas as pd
 import streamlit as st
 from pyproj import Transformer
 
+# --- Toggle this page on/off easily ---
+PAGE_ENABLED = True  # Change between True/False to enable/disable this page
+if not PAGE_ENABLED:
+    st.stop()
+
 st.set_page_config(page_title="Excel Coordinate Transformation (Ontario only)", page_icon="🧭")
 st.title("Excel Coordinate Transformation")
 
