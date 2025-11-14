@@ -73,7 +73,13 @@ def invalid_utm(e: pd.Series, n: pd.Series) -> pd.Series:
     return bad
 
 def tr_to_ll(grid_path: Path) -> Transformer:
-    # NAD27/UTM17N (m) -> NAD83 geographic (deg)
+    """
+    NAD27 / UTM Zone 17N (m) -> NAD83 geographic (deg)
+
+    1) inverse UTM 17N (NAD27) -> NAD27 geographic (rad)
+    2) forward NTv2 grid shift NAD27 -> NAD83 (rad)
+    3) radians -> degrees
+    """
     pipe = (
         f"+proj=pipeline "
         f"+step +inv +proj=utm +zone=17 +datum=NAD27 "
@@ -83,11 +89,17 @@ def tr_to_ll(grid_path: Path) -> Transformer:
     return Transformer.from_pipeline(pipe)
 
 def tr_to_utm(grid_path: Path) -> Transformer:
-    # NAD83 geographic (deg) -> NAD27/UTM17N (m)
+    """
+    NAD83 geographic (deg) -> NAD27 / UTM Zone 17N (m)
+
+    1) degrees -> radians
+    2) inverse NTv2 grid shift NAD83 -> NAD27 (rad)
+    3) UTM 17N on NAD27 (m)
+    """
     pipe = (
         f"+proj=pipeline "
         f"+step +proj=unitconvert +xy_in=deg +xy_out=rad "
-        f"+step +proj=hgridshift +grids={grid_path} +inv "
+        f"+step +inv +proj=hgridshift +grids={grid_path} "
         f"+step +proj=utm +zone=17 +datum=NAD27"
     )
     return Transformer.from_pipeline(pipe)
@@ -120,7 +132,7 @@ if up and st.button("Transform"):
         if col_lat is None: col_lat = "lat";  df[col_lat] = np.nan
         if col_lon is None: col_lon = "long"; df[col_lon] = np.nan
         if col_n is None:   col_n   = "N";    df[col_n]   = np.nan
-        if col_e is None:   col_e    = "E";    df[col_e]    = np.nan
+        if col_e is None:   col_e   = "E";    df[col_e]   = np.nan
 
         # Keep a grid_used column
         if "grid_used" not in df.columns:
@@ -137,26 +149,28 @@ if up and st.button("Transform"):
         # ---- Case 1: N/E -> lat/long (Toronto first, Ontario fallback) ----
         if has_utm.any() and TR_TOR_TO_LL is not None:
             idx = df.index[has_utm]
-            lon_t, lat_t = TR_TOR_TO_LL.transform(df.loc[idx, col_e].to_numpy(),
-                                                  df.loc[idx, col_n].to_numpy())
+            lon_t, lat_t = TR_TOR_TO_LL.transform(
+                df.loc[idx, col_e].to_numpy(),
+                df.loc[idx, col_n].to_numpy()
+            )
             lon_t = pd.Series(lon_t, index=idx, dtype="float64")
             lat_t = pd.Series(lat_t, index=idx, dtype="float64")
             bad = invalid_ll(lon_t, lat_t)
-            # fallback for bad rows
+
             if bad.any() and TR_ON_TO_LL is not None:
                 idx_bad = bad.index[bad]
-                lon_o, lat_o = TR_ON_TO_LL.transform(df.loc[idx_bad, col_e].to_numpy(),
-                                                     df.loc[idx_bad, col_n].to_numpy())
+                lon_o, lat_o = TR_ON_TO_LL.transform(
+                    df.loc[idx_bad, col_e].to_numpy(),
+                    df.loc[idx_bad, col_n].to_numpy()
+                )
                 lon_t.loc[idx_bad] = lon_o
                 lat_t.loc[idx_bad] = lat_o
-                # mark grids
+
                 df.loc[idx, "grid_used"] = "TO27CSv1.gsb"
                 df.loc[idx_bad, "grid_used"] = "ON27CSv1.gsb"
-                # still-bad rows remain unmodified; caller keeps whatever was there
             else:
                 df.loc[idx, "grid_used"] = "TO27CSv1.gsb"
 
-            # write NAD83 lat/lon
             good = ~invalid_ll(lon_t, lat_t)
             df.loc[good.index[good], col_lon] = lon_t[good]
             df.loc[good.index[good], col_lat] = lat_t[good]
@@ -164,19 +178,23 @@ if up and st.button("Transform"):
         # ---- Case 2: lat/long -> N/E (Toronto first, Ontario fallback) ----
         if has_latlon.any() and TR_TOR_TO_UTM is not None:
             idx = df.index[has_latlon]
-            e_t, n_t = TR_TOR_TO_UTM.transform(df.loc[idx, col_lon].to_numpy(),
-                                               df.loc[idx, col_lat].to_numpy())
+            e_t, n_t = TR_TOR_TO_UTM.transform(
+                df.loc[idx, col_lon].to_numpy(),
+                df.loc[idx, col_lat].to_numpy()
+            )
             e_t = pd.Series(e_t, index=idx, dtype="float64")
             n_t = pd.Series(n_t, index=idx, dtype="float64")
             bad = invalid_utm(e_t, n_t)
+
             if bad.any() and TR_ON_TO_UTM is not None:
                 idx_bad = bad.index[bad]
-                e_o, n_o = TR_ON_TO_UTM.transform(df.loc[idx_bad, col_lon].to_numpy(),
-                                                  df.loc[idx_bad, col_lat].to_numpy())
+                e_o, n_o = TR_ON_TO_UTM.transform(
+                    df.loc[idx_bad, col_lon].to_numpy(),
+                    df.loc[idx_bad, col_lat].to_numpy()
+                )
                 e_t.loc[idx_bad] = e_o
                 n_t.loc[idx_bad] = n_o
-                # mark grids
-                # (don't overwrite grid_used if it was already set by the other branch)
+
                 df.loc[idx, "grid_used"] = df.loc[idx, "grid_used"].replace("", "TO27CSv1.gsb")
                 df.loc[idx_bad, "grid_used"] = "ON27CSv1.gsb"
             else:
