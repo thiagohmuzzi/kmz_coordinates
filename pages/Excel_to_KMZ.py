@@ -1,5 +1,6 @@
 # Excel → KMZ (NAD83 lat/long OR NAD27/UTM17N)
 # Toronto grid default with Ontario fallback per-row; POINTS ONLY; KMZ + Validation Excel; persistent downloads
+
 import os
 import zipfile
 from io import BytesIO
@@ -63,14 +64,15 @@ def invalid_ll(lon_series: pd.Series, lat_series: pd.Series) -> pd.Series:
     bad |= ~lon_series.between(-180.0, 180.0) | ~lat_series.between(-90.0, 90.0)
     return bad
 
-def transformer_for_nad27utm17_to_nad83_ll(grid_path: Path) -> Transformer:
+def transformer_nad27utm17_to_nad83_ll(grid_path: Path) -> Transformer:
     """
     Input: NAD27 / UTM Zone 17N (meters)
     Output: NAD83 geographic (degrees)
-    Steps:
-      1) inverse UTM17 (to NAD27 geographic, radians)
-      2) apply NTv2 grid shift (NAD27->NAD83), radians
-      3) convert to degrees
+
+    1) inverse UTM17 (to NAD27 geographic, radians)
+    2) apply NTv2 grid shift NAD27->NAD83 (radians)
+    3) convert to degrees
+    (same as Excel_Transformation.tr_to_ll)
     """
     pipe = (
         f"+proj=pipeline "
@@ -160,8 +162,8 @@ if convert_clicked and up:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
                 # Transformers (build only if grids exist)
-                tr_tor = transformer_for_nad27utm17_to_nad83_ll(TOR_GRID) if TOR_GRID.exists() else None
-                tr_on  = transformer_for_nad27utm17_to_nad83_ll(ON_GRID)  if ON_GRID.exists()  else None
+                tr_tor = transformer_nad27utm17_to_nad83_ll(TOR_GRID) if TOR_GRID.exists() else None
+                tr_on  = transformer_nad27utm17_to_nad83_ll(ON_GRID)  if ON_GRID.exists()  else None
 
                 # Output frame
                 out = pd.DataFrame(index=df.index)
@@ -175,7 +177,7 @@ if convert_clicked and up:
                 out["grid_used"] = ""
                 out["input_type"] = ""
 
-                # A) explicit NAD83 lat/long
+                # A) explicit NAD83 lat/long (pass-through)
                 if col_lat and col_lon:
                     m_latlon = df[col_lat].notna() & df[col_lon].notna()
                     out.loc[m_latlon, "lat"] = df.loc[m_latlon, col_lat]
@@ -235,8 +237,11 @@ if convert_clicked and up:
 
                     base = Path(up.name).stem
 
-                    # KMZ (POINTS ONLY)
-                    kmz_bytes = build_kmz_points(f"{base} — NAD83 Geographic", out[["folder","feature_name","lon","lat","elevation"]])
+                    # KMZ (POINTS ONLY, NAD83)
+                    kmz_bytes = build_kmz_points(
+                        f"{base} — NAD83 Geographic",
+                        out[["folder","feature_name","lon","lat","elevation"]]
+                    )
 
                     # Validation Excel
                     valid_cols = ["folder","feature_name","lat","lon","N","E","elevation","grid_used","input_type"]
@@ -283,7 +288,6 @@ if st.session_state.kmz_bytes and st.session_state.validation_xlsx:
         key="dl_xlsx",
     )
 
-    # Queue a rerun instead of calling st.rerun() inside the callback
     def _queue_refresh():
         for k in ("kmz_bytes", "validation_xlsx", "base_name"):
             st.session_state.pop(k, None)
@@ -291,8 +295,6 @@ if st.session_state.kmz_bytes and st.session_state.validation_xlsx:
 
     st.button("Refresh / New conversion", on_click=_queue_refresh, type="secondary")
 
-# Perform the rerun outside of any callback (prevents the yellow warning)
 if st.session_state.get("_do_rerun"):
     st.session_state.pop("_do_rerun", None)
     st.rerun()
-
