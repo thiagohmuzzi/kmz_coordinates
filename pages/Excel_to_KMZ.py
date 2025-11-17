@@ -29,7 +29,7 @@ st.caption(
     """
     Input coordinates to the excel template provided. 
     Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). 
-    Folder information is optional and can be provided if desired to have the features nested in separate folders for Google Earth. Elevation is optional. /n
+    Folder information is optional and can be provided if desired to have the features nested in separate folders for Google Earth. Elevation is optional. \n
     **Note:** Always visually confirm the geographic placement of the points in the new file.
 
     """
