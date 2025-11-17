@@ -29,11 +29,8 @@ st.set_page_config(page_title="KMZ Coordinates Extraction", page_icon="🧭")
 st.title("KMZ Coordinates to Excel – NAD83 Geographic / NAD27 UTM Zone 17N")
 st.caption(
     """
-    Input coordinates to the excel template provided. 
-    Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). 
-    Folder information is optional and can be provided if desired to have the features nested in separate folders for Google Earth. Elevation is optional. \n
-    **Note:** Always visually confirm the geographic placement of the points in the new file.
-
+    Extracts NAD83 Geographic coordinates (lat/long) and converts to NAD27 / UTM Zone 17N. \n
+    **Note:** Always confirm samples of the NAD 27 converted coordinates with the [NRCan NTv2 website](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php).
     """
 )
 
