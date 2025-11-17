@@ -28,10 +28,9 @@ os.environ["PROJ_NETWORK"] = "OFF"
 st.set_page_config(page_title="KMZ Coordinates Extraction", page_icon="🧭")
 st.title("KMZ Coordinates to Excel – NAD83 Geographic / NAD27 UTM Zone 17N")
 st.caption(
-    """
-    Extracts NAD83 Geographic coordinates (lat/long) and converts to NAD27 / UTM Zone 17N. \n
-    **Note:** Always confirm samples of the NAD 27 converted coordinates with the [NRCan NTv2 website](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php).
-    """
+    "Uploads KMZ/KML, extracts NAD83 Geographic coordinates (lat/long), "
+    "and converts to NAD27 / UTM Zone 17N using TO27CSv1.gsb (Toronto) with "
+    "ON27CSv1.gsb fallback where needed. Same transformation logic as Excel_Transformation."
 )
 
 up = st.file_uploader("Upload KMZ or KML", type=["kmz", "kml"])
@@ -43,7 +42,7 @@ up = st.file_uploader("Upload KMZ or KML", type=["kmz", "kml"])
 def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
     """
     Parse KML bytes and return DataFrame:
-    feature_name, vertex_index, lat, lon, elevation_m
+    feature_name, vertex_index, lat_4269, lon_4269, elevation_m
     (lat/long assumed NAD83, as displayed by Google Earth default).
     """
     ns = {"kml": "http://www.opengis.net/kml/2.2"}
@@ -75,8 +74,8 @@ def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
                     {
                         "feature_name": name,
                         "vertex_index": idx + 1,
-                        "lat": lat,
-                        "lon": lon,
+                        "lat_4269": lat,
+                        "lon_4269": lon,
                         "elevation_m": elev,
                     }
                 )
@@ -141,13 +140,13 @@ if up and st.button("Convert"):
             st.stop()
 
         # Round lat/long slightly for readability
-        df["lat"] = df["lat"].round(9)
-        df["lon"] = df["lon"].round(9)
+        df["lat_4269"] = df["lat_4269"].round(9)
+        df["lon_4269"] = df["lon_4269"].round(9)
 
         # ---- NAD83 → NAD27 / UTM 17N with Toronto + Ontario fallback ----
         # Toronto transform
         t_tor = transformer_nad83_ll_to_nad27_utm(TOR_GRID)
-        E_tor, N_tor = t_tor.transform(df["lon"].to_numpy(), df["lat"].to_numpy())
+        E_tor, N_tor = t_tor.transform(df["lon_4269"].to_numpy(), df["lat_4269"].to_numpy())
 
         E = pd.Series(E_tor, index=df.index, dtype="float64")
         N = pd.Series(N_tor, index=df.index, dtype="float64")
@@ -159,8 +158,8 @@ if up and st.button("Convert"):
         if bad.any() and ON_GRID.exists():
             t_on = transformer_nad83_ll_to_nad27_utm(ON_GRID)
             E_on, N_on = t_on.transform(
-                df.loc[bad, "lon"].to_numpy(),
-                df.loc[bad, "lat"].to_numpy()
+                df.loc[bad, "lon_4269"].to_numpy(),
+                df.loc[bad, "lat_4269"].to_numpy()
             )
             E.loc[bad] = E_on
             N.loc[bad] = N_on
@@ -182,8 +181,8 @@ if up and st.button("Convert"):
             )
 
         # Final N/E, rounded
-        df["N_"] = N.round(3)
-        df["E"] = E.round(3)
+        df["N_26717"] = N.round(3)
+        df["E_26717"] = E.round(3)
         df["grid_used"] = grid_used
 
         # ----------------------------------------------------------------
@@ -209,10 +208,10 @@ if up and st.button("Convert"):
         ws.append([
             "feature_name",
             "vertex_index",
-            "lat",
-            "lon",
-            "N",
-            "E",
+            "lat_4269",
+            "lon_4269",
+            "N_26717",
+            "E_26717",
             "elevation_m",
             "grid_used",
         ])
@@ -220,10 +219,10 @@ if up and st.button("Convert"):
         out = df[[
             "feature_name",
             "vertex_index",
-            "lat",
-            "lon",
-            "N",
-            "E",
+            "lat_4269",
+            "lon_4269",
+            "N_26717",
+            "E_26717",
             "elevation_m",
             "grid_used",
         ]].copy()
