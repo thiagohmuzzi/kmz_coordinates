@@ -35,7 +35,6 @@ st.caption(
     Folder information and elevations are optional. \n
     **Note:** Always confirm samples of the converted coordinates with the [NRCan NTv2 website](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php).
     """
-
 )
 
 # -------- template download --------
@@ -70,19 +69,14 @@ def invalid_ll(lon: pd.Series, lat: pd.Series) -> pd.Series:
     bad |= ~lon.between(-180.0, 180.0) | ~lat.between(-90.0, 90.0)
     return bad
 
-def invalid_utm(e: pd.Series, n: pd.Series) -> pd.Series:
-    bad = ~np.isfinite(e) | ~np.isfinite(n)
-    # loose UTM sanity (zone 17N plausible bounds; keep wide)
-    bad |= ~e.between(100_000, 900_000) | ~n.between(4_000_000, 6_000_000)
+def invalid_utm(E: pd.Series, N: pd.Series) -> pd.Series:
+    bad = ~np.isfinite(E) | ~np.isfinite(N)
+    bad |= ~E.between(100_000, 900_000) | ~N.between(4_000_000, 6_000_000)
     return bad
 
 def tr_to_ll(grid_path: Path) -> Transformer:
     """
     NAD27 / UTM Zone 17N (m) -> NAD83 geographic (deg)
-
-    1) inverse UTM 17N (NAD27) -> NAD27 geographic (rad)
-    2) forward NTv2 grid shift NAD27 -> NAD83 (rad)
-    3) radians -> degrees
     """
     pipe = (
         f"+proj=pipeline "
@@ -95,10 +89,6 @@ def tr_to_ll(grid_path: Path) -> Transformer:
 def tr_to_utm(grid_path: Path) -> Transformer:
     """
     NAD83 geographic (deg) -> NAD27 / UTM Zone 17N (m)
-
-    1) degrees -> radians
-    2) inverse NTv2 grid shift NAD83 -> NAD27 (rad)
-    3) UTM 17N on NAD27 (m)
     """
     pipe = (
         f"+proj=pipeline "
@@ -114,7 +104,7 @@ TR_ON_TO_LL   = tr_to_ll(ON_GRID)   if ON_GRID.exists()  else None
 TR_TOR_TO_UTM = tr_to_utm(TOR_GRID) if TOR_GRID.exists() else None
 TR_ON_TO_UTM  = tr_to_utm(ON_GRID)  if ON_GRID.exists()  else None
 
-# -------- session to hold output so multiple downloads work if needed --------
+# -------- session to hold output --------
 for k in ("out_xlsx_bytes", "out_filename"):
     if k not in st.session_state:
         st.session_state[k] = None
@@ -127,35 +117,31 @@ if up and st.button("Transform"):
         df = df0.copy()
         df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
 
-        col_lat  = pick(df, ["lat", "latitude"])
-        col_lon  = pick(df, ["long", "lon", "longitude"])
-        col_n    = pick(df, ["n","northing","utm_n","utm_northing","y"])
-        col_e    = pick(df, ["e","easting","utm_e","utm_easting","x"])
+        col_lat = pick(df, ["lat", "latitude"])
+        col_lon = pick(df, ["long", "lon", "longitude"])
+        col_N   = pick(df, ["n","northing","utm_n","utm_northing","y"])
+        col_E   = pick(df, ["e","easting","utm_e","utm_easting","x"])
 
-        # Ensure output columns exist in the same dataframe (do not drop other columns)
         if col_lat is None: col_lat = "lat";  df[col_lat] = np.nan
         if col_lon is None: col_lon = "long"; df[col_lon] = np.nan
-        if col_n is None:   col_n   = "N";    df[col_n]   = np.nan
-        if col_e is None:   col_e   = "E";    df[col_e]   = np.nan
+        if col_N is None:   col_N   = "N";    df[col_N]   = np.nan
+        if col_E is None:   col_E   = "E";    df[col_E]   = np.nan
 
-        # Keep a grid_used column
         if "grid_used" not in df.columns:
             df["grid_used"] = ""
 
-        # numeric coercion on coord columns
-        for c in (col_lat, col_lon, col_n, col_e):
+        for c in (col_lat, col_lon, col_N, col_E):
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-        # Row masks
         has_latlon = df[col_lat].notna() & df[col_lon].notna()
-        has_utm    = df[col_n].notna() & df[col_e].notna()
+        has_utm    = df[col_N].notna() & df[col_E].notna()
 
-        # ---- Case 1: N/E -> lat/long (Toronto first, Ontario fallback) ----
+        # ---- Case 1: N/E -> lat/long ----
         if has_utm.any() and TR_TOR_TO_LL is not None:
             idx = df.index[has_utm]
             lon_t, lat_t = TR_TOR_TO_LL.transform(
-                df.loc[idx, col_e].to_numpy(),
-                df.loc[idx, col_n].to_numpy()
+                df.loc[idx, col_E].to_numpy(),
+                df.loc[idx, col_N].to_numpy()
             )
             lon_t = pd.Series(lon_t, index=idx, dtype="float64")
             lat_t = pd.Series(lat_t, index=idx, dtype="float64")
@@ -164,8 +150,8 @@ if up and st.button("Transform"):
             if bad.any() and TR_ON_TO_LL is not None:
                 idx_bad = bad.index[bad]
                 lon_o, lat_o = TR_ON_TO_LL.transform(
-                    df.loc[idx_bad, col_e].to_numpy(),
-                    df.loc[idx_bad, col_n].to_numpy()
+                    df.loc[idx_bad, col_E].to_numpy(),
+                    df.loc[idx_bad, col_N].to_numpy()
                 )
                 lon_t.loc[idx_bad] = lon_o
                 lat_t.loc[idx_bad] = lat_o
@@ -179,42 +165,40 @@ if up and st.button("Transform"):
             df.loc[good.index[good], col_lon] = lon_t[good]
             df.loc[good.index[good], col_lat] = lat_t[good]
 
-        # ---- Case 2: lat/long -> N/E (Toronto first, Ontario fallback) ----
+        # ---- Case 2: lat/long -> N/E ----
         if has_latlon.any() and TR_TOR_TO_UTM is not None:
             idx = df.index[has_latlon]
-            e_t, n_t = TR_TOR_TO_UTM.transform(
+            E_t, N_t = TR_TOR_TO_UTM.transform(
                 df.loc[idx, col_lon].to_numpy(),
                 df.loc[idx, col_lat].to_numpy()
             )
-            e_t = pd.Series(e_t, index=idx, dtype="float64")
-            n_t = pd.Series(n_t, index=idx, dtype="float64")
-            bad = invalid_utm(e_t, n_t)
+            E_t = pd.Series(E_t, index=idx, dtype="float64")
+            N_t = pd.Series(N_t, index=idx, dtype="float64")
+            bad = invalid_utm(E_t, N_t)
 
             if bad.any() and TR_ON_TO_UTM is not None:
                 idx_bad = bad.index[bad]
-                e_o, n_o = TR_ON_TO_UTM.transform(
+                E_o, N_o = TR_ON_TO_UTM.transform(
                     df.loc[idx_bad, col_lon].to_numpy(),
                     df.loc[idx_bad, col_lat].to_numpy()
                 )
-                e_t.loc[idx_bad] = e_o
-                n_t.loc[idx_bad] = n_o
+                E_t.loc[idx_bad] = E_o
+                N_t.loc[idx_bad] = N_o
 
                 df.loc[idx, "grid_used"] = df.loc[idx, "grid_used"].replace("", "TO27CSv1.gsb")
                 df.loc[idx_bad, "grid_used"] = "ON27CSv1.gsb"
             else:
                 df.loc[idx, "grid_used"] = df.loc[idx, "grid_used"].replace("", "TO27CSv1.gsb")
 
-            good = ~invalid_utm(e_t, n_t)
-            df.loc[good.index[good], col_e] = e_t[good]
-            df.loc[good.index[good], col_n] = n_t[good]
+            good = ~invalid_utm(E_t, N_t)
+            df.loc[good.index[good], col_E] = E_t[good]
+            df.loc[good.index[good], col_N] = N_t[good]
 
-        # round for neatness
         df[col_lat] = df[col_lat].round(9)
         df[col_lon] = df[col_lon].round(9)
-        df[col_e]   = df[col_e].round(3)
-        df[col_n]   = df[col_n].round(3)
+        df[col_E]   = df[col_E].round(3)
+        df[col_N]   = df[col_N].round(3)
 
-        # pack Excel (same sheet name as input’s first sheet)
         out = BytesIO()
         with pd.ExcelWriter(out, engine="openpyxl") as xw:
             df.to_excel(xw, index=False, sheet_name="Transformed")
