@@ -42,8 +42,7 @@ up = st.file_uploader("Upload KMZ or KML", type=["kmz", "kml"])
 def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
     """
     Parse KML bytes and return DataFrame:
-    feature_name, vertex_index, lat_4269, lon_4269, elevation_m
-    (lat/long assumed NAD83, as displayed by Google Earth default).
+    feature_name, vertex_index, lat, lon, elevation_m
     """
     ns = {"kml": "http://www.opengis.net/kml/2.2"}
     root = ET.fromstring(kml_bytes)
@@ -74,8 +73,8 @@ def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
                     {
                         "feature_name": name,
                         "vertex_index": idx + 1,
-                        "lat_4269": lat,
-                        "lon_4269": lon,
+                        "lat": lat,
+                        "lon": lon,
                         "elevation_m": elev,
                     }
                 )
@@ -88,11 +87,6 @@ def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
 def transformer_nad83_ll_to_nad27_utm(grid_path: Path) -> Transformer:
     """
     NAD83 geographic (degrees) -> NAD27 / UTM Zone 17N (meters)
-
-    This matches the canonical pipeline we used in Excel_Transformation:
-      1) degrees -> radians
-      2) inverse NTv2 grid shift NAD83 -> NAD27 (radians)
-      3) UTM 17N (NAD27) -> easting/northing
     """
     pipe = (
         f"+proj=pipeline "
@@ -106,7 +100,6 @@ def transformer_nad83_ll_to_nad27_utm(grid_path: Path) -> Transformer:
 def invalid_utm(e: pd.Series, n: pd.Series) -> pd.Series:
     """
     Flag obviously invalid UTM17 coordinates.
-    Keep bounds broad to avoid falsely rejecting valid airport points.
     """
     m = e.isna() | n.isna()
     m |= ~e.between(100_000, 900_000)
@@ -126,7 +119,7 @@ if up and st.button("Convert"):
         if not ON_GRID.exists():
             st.info(f"Ontario grid not found at: {ON_GRID}. Fallback will not be used.")
 
-        # Read KML bytes from KMZ or KML
+        # Read KML bytes
         if up.name.lower().endswith(".kmz"):
             with zipfile.ZipFile(up) as z:
                 kml_name = next(n for n in z.namelist() if n.lower().endswith(".kml"))
@@ -139,14 +132,13 @@ if up and st.button("Convert"):
             st.error("No coordinates found in KML/KMZ.")
             st.stop()
 
-        # Round lat/long slightly for readability
-        df["lat_4269"] = df["lat_4269"].round(9)
-        df["lon_4269"] = df["lon_4269"].round(9)
+        # Round lat/long
+        df["lat"] = df["lat"].round(9)
+        df["lon"] = df["lon"].round(9)
 
-        # ---- NAD83 → NAD27 / UTM 17N with Toronto + Ontario fallback ----
-        # Toronto transform
+        # ---- NAD83 → NAD27 / UTM 17N ----
         t_tor = transformer_nad83_ll_to_nad27_utm(TOR_GRID)
-        E_tor, N_tor = t_tor.transform(df["lon_4269"].to_numpy(), df["lat_4269"].to_numpy())
+        E_tor, N_tor = t_tor.transform(df["lon"].to_numpy(), df["lat"].to_numpy())
 
         E = pd.Series(E_tor, index=df.index, dtype="float64")
         N = pd.Series(N_tor, index=df.index, dtype="float64")
@@ -154,12 +146,11 @@ if up and st.button("Convert"):
 
         bad = invalid_utm(E, N)
 
-        # Ontario fallback (row-by-row where Toronto failed)
         if bad.any() and ON_GRID.exists():
             t_on = transformer_nad83_ll_to_nad27_utm(ON_GRID)
             E_on, N_on = t_on.transform(
-                df.loc[bad, "lon_4269"].to_numpy(),
-                df.loc[bad, "lat_4269"].to_numpy()
+                df.loc[bad, "lon"].to_numpy(),
+                df.loc[bad, "lat"].to_numpy()
             )
             E.loc[bad] = E_on
             N.loc[bad] = N_on
@@ -180,9 +171,9 @@ if up and st.button("Convert"):
                 "is not available – N/E may be invalid."
             )
 
-        # Final N/E, rounded
-        df["N_26717"] = N.round(3)
-        df["E_26717"] = E.round(3)
+        # Final N/E
+        df["N"] = N.round(3)
+        df["E"] = E.round(3)
         df["grid_used"] = grid_used
 
         # ----------------------------------------------------------------
@@ -192,7 +183,6 @@ if up and st.button("Convert"):
         ws = wb.active
         ws.title = "Coordinates"
 
-        # Datum header row
         ws.append([
             "",
             "",
@@ -204,14 +194,13 @@ if up and st.button("Convert"):
             "",
         ])
 
-        # Column header row
         ws.append([
             "feature_name",
             "vertex_index",
-            "lat_4269",
-            "lon_4269",
-            "N_26717",
-            "E_26717",
+            "lat",
+            "lon",
+            "N",
+            "E",
             "elevation_m",
             "grid_used",
         ])
@@ -219,10 +208,10 @@ if up and st.button("Convert"):
         out = df[[
             "feature_name",
             "vertex_index",
-            "lat_4269",
-            "lon_4269",
-            "N_26717",
-            "E_26717",
+            "lat",
+            "lon",
+            "N",
+            "E",
             "elevation_m",
             "grid_used",
         ]].copy()
