@@ -33,7 +33,7 @@ st.caption(
     Input coordinates to the excel template provided. 
     Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). 
     Folder information and elevations are optional. \n
-    **Note:** Always confirm samples of the converted coordinates with the [NRCan NTv2 website](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php).
+    **Note:** Always confirm a few rows of the converted coordinates with the [NRCan NTv2 website](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php).
     """
 )
 
