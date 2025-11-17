@@ -25,7 +25,7 @@ os.environ["PROJ_NETWORK"] = "OFF"
 # -------------------------------------------------------------------
 # Streamlit UI
 # -------------------------------------------------------------------
-st.set_page_config(page_title="KMZ Coordinates Extraction", page_icon="🧭")
+st.set_page_config(page_title="Excel to KMZ", page_icon="🌎")
 st.title("KMZ Coordinates to Excel – NAD83 Geographic / NAD27 UTM Zone 17N")
 st.caption(
     """
