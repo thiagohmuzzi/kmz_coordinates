@@ -26,9 +26,13 @@ os.environ["PROJ_DATA"] = str(ROOT.resolve())
 os.environ["PROJ_NETWORK"] = "OFF"
 
 st.caption(
-    "Input coordinates to the excel template provided. Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). "
-    "Folder information is optional and can be provided if desired to have the features nested in separate folders for Google Earth. Elevation is optional. "
-    "Default grid: TO27CSv1.gsb • Fallback if outside coverage: ON27CSv1.gsb"
+    """
+    Input coordinates to the excel template provided. 
+    Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). 
+    Folder information is optional and can be provided if desired to have the features nested in separate folders for Google Earth. Elevation is optional. /n
+    **Note:** Always visually confirm the geographic placement of the points in the new file.
+
+    """
 )
 
 # ---------------------- Template download ----------------------
