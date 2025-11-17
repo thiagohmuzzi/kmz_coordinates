@@ -28,8 +28,10 @@ os.environ["PROJ_NETWORK"] = "OFF"
 st.set_page_config(page_title="KMZ Coordinates Extraction", page_icon="🧭")
 st.title("KMZ Coordinates to Excel – NAD83 Geographic / NAD27 UTM Zone 17N")
 st.caption(
-    "Extracts NAD83 Geographic coordinates (lat/long) and converts to NAD27 / UTM Zone 17N "
-    "• **Note:** Always confirm samples of the NAD 27 converted coordinates with the [NRCan NTv2](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php) website."
+    """
+    Extracts NAD83 Geographic coordinates (lat/long) and converts to NAD27 / UTM Zone 17N 
+    **Note:** Always confirm samples of the NAD 27 converted coordinates with the [NRCan NTv2](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php) website.
+    """
 )
 
 up = st.file_uploader("Upload KMZ or KML", type=["kmz", "kml"])
