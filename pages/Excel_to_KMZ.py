@@ -28,9 +28,12 @@ os.environ["PROJ_NETWORK"] = "OFF"
 st.set_page_config(page_title="KMZ Coordinates Extraction", page_icon="🧭")
 st.title("KMZ Coordinates to Excel – NAD83 Geographic / NAD27 UTM Zone 17N")
 st.caption(
-    "Uploads KMZ/KML, extracts NAD83 Geographic coordinates (lat/long), "
-    "and converts to NAD27 / UTM Zone 17N using TO27CSv1.gsb (Toronto) with "
-    "ON27CSv1.gsb fallback where needed. Same transformation logic as Excel_Transformation."
+    """
+    Input coordinates to the excel template provided. 
+    Rows may contain either **NAD83 Geographic** (lat/long) or **NAD27 / UTM Zone 17N** (N/E). 
+    Folder information is optional and can be provided if desired to have the features nested in separate folders for Google Earth. Elevation is optional. \n
+    **Note:** Visually confirm geographic positioning of points on the new file.
+    """
 )
 
 up = st.file_uploader("Upload KMZ or KML", type=["kmz", "kml"])
