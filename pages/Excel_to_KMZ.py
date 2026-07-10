@@ -72,7 +72,7 @@ def build_excel_template() -> bytes:
     thin = Side(style="thin", color="808080")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    group_fill = PatternFill("solid", fgColor="D9EAF7")
+    group_fill = PatternFill("solid", fgColor="EDEDED")
     header_fill = PatternFill("solid", fgColor="EDEDED")
 
     for cell_ref in ["D1", "F1"]:
