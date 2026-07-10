@@ -47,13 +47,11 @@ def build_excel_template() -> bytes:
     ws = wb.active
     ws.title = "Template"
 
-    # Group headers
     ws.merge_cells("D1:E1")
     ws.merge_cells("F1:G1")
     ws["D1"] = "WGS84 Geographic"
     ws["F1"] = "WGS84 UTM 17T"
 
-    # Column headers - E before N
     headers = [
         "folder",
         "subfolder",
@@ -68,12 +66,11 @@ def build_excel_template() -> bytes:
     for col_idx, header in enumerate(headers, start=1):
         ws.cell(row=2, column=col_idx).value = header
 
-    # Formatting
     thin = Side(style="thin", color="808080")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    geo_fill = PatternFill("solid", fgColor="EDEDED")  # D1:E1
-    utm_fill = PatternFill("solid", fgColor="EDEDED")  # F1:G1
+    geo_fill = PatternFill("solid", fgColor="EDEDED")
+    utm_fill = PatternFill("solid", fgColor="EDEDED")
     header_fill = PatternFill("solid", fgColor="EDEDED")
 
     for cell_ref, fill in [("D1", geo_fill), ("F1", utm_fill)]:
@@ -92,16 +89,15 @@ def build_excel_template() -> bytes:
         cell.font = Font(bold=True)
         cell.fill = header_fill
 
-    # Column widths
     widths = {
-        "A": 18,  # folder
-        "B": 18,  # subfolder
-        "C": 26,  # feature_name
-        "D": 16,  # lat
-        "E": 16,  # long
-        "F": 16,  # E
-        "G": 16,  # N
-        "H": 22,  # elevation optional
+        "A": 18,
+        "B": 18,
+        "C": 26,
+        "D": 16,
+        "E": 16,
+        "F": 16,
+        "G": 16,
+        "H": 22,
     }
 
     for col, width in widths.items():
@@ -111,13 +107,12 @@ def build_excel_template() -> bytes:
     ws.row_dimensions[2].height = 22
     ws.freeze_panes = "A3"
 
-    # Number formats for user-entry area
     for row in range(3, 1003):
-        ws[f"D{row}"].number_format = "0.000000000"  # lat
-        ws[f"E{row}"].number_format = "0.000000000"  # long
-        ws[f"F{row}"].number_format = "0.000"        # E
-        ws[f"G{row}"].number_format = "0.000"        # N
-        ws[f"H{row}"].number_format = "0.00"         # elevation
+        ws[f"D{row}"].number_format = "0.000000000"
+        ws[f"E{row}"].number_format = "0.000000000"
+        ws[f"F{row}"].number_format = "0.000"
+        ws[f"G{row}"].number_format = "0.000"
+        ws[f"H{row}"].number_format = "0.00"
 
     buf = BytesIO()
     wb.save(buf)
@@ -162,10 +157,6 @@ def pick(df: pd.DataFrame, options) -> str | None:
 
 
 def read_excel_template_aware(file_bytes: bytes) -> pd.DataFrame:
-    """
-    New template uses row 2 as actual headers, so first try header=1.
-    Fallback to header=0 to remain compatible with older simple templates.
-    """
     for header_row in [1, 0]:
         temp = pd.read_excel(BytesIO(file_bytes), header=header_row)
         temp = normalize_columns(temp)
@@ -187,29 +178,26 @@ def read_excel_template_aware(file_bytes: bytes) -> pd.DataFrame:
 
 
 def invalid_ll(long_series: pd.Series, lat_series: pd.Series) -> pd.Series:
-    """Invalid if NaN, inf, or outside global WGS84 lat/long bounds."""
-    bad = ~np.isfinite(long_series) | ~np.isfinite(lat_series)
-    bad |= ~long_series.between(-180.0, 180.0)
-    bad |= ~lat_series.between(-90.0, 90.0)
+    long_num = pd.to_numeric(long_series, errors="coerce")
+    lat_num = pd.to_numeric(lat_series, errors="coerce")
+
+    bad = long_num.isna() | lat_num.isna()
+    bad |= ~long_num.between(-180.0, 180.0)
+    bad |= ~lat_num.between(-90.0, 90.0)
     return bad
 
 
 def invalid_wgs84_utm17(e_series: pd.Series, n_series: pd.Series) -> pd.Series:
-    """
-    Broad sanity check for WGS84 UTM Zone 17N.
-    Google Earth may show Pearson/Toronto as UTM 17T, but conversion uses EPSG:32617.
-    """
-    bad = ~np.isfinite(e_series) | ~np.isfinite(n_series)
-    bad |= ~e_series.between(100_000, 900_000)
-    bad |= ~n_series.between(0, 10_000_000)
+    e_num = pd.to_numeric(e_series, errors="coerce")
+    n_num = pd.to_numeric(n_series, errors="coerce")
+
+    bad = e_num.isna() | n_num.isna()
+    bad |= ~e_num.between(100_000, 900_000)
+    bad |= ~n_num.between(0, 10_000_000)
     return bad
 
 
 def transformer_wgs84_utm17_to_wgs84_geo() -> Transformer:
-    """
-    WGS84 / UTM Zone 17N meters -> WGS84 Geographic degrees.
-    EPSG:32617 -> EPSG:4326.
-    """
     return Transformer.from_crs("EPSG:32617", "EPSG:4326", always_xy=True)
 
 
@@ -219,15 +207,19 @@ def clean_folder_value(value) -> str:
     return str(value).strip()
 
 
+def add_note(df: pd.DataFrame, mask: pd.Series, note: str) -> None:
+    if not mask.any():
+        return
+
+    existing = df.loc[mask, "conversion_note"].fillna("").astype(str).str.strip()
+    df.loc[mask, "conversion_note"] = np.where(
+        existing == "",
+        note,
+        existing + "; " + note,
+    )
+
+
 def build_kmz_points(doc_name: str, rows: pd.DataFrame) -> bytes:
-    """
-    rows expected:
-      folder, subfolder, feature_name, long, lat, elevation
-
-    KML coordinate order is always:
-      longitude,latitude[,elevation]
-    """
-
     def kml_header(name):
         return (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -275,27 +267,22 @@ def build_kmz_points(doc_name: str, rows: pd.DataFrame) -> bytes:
     kml = BytesIO()
     kml.write(kml_header(doc_name).encode("utf-8"))
 
-    # Rows without folder or subfolder: document-level placemarks
     doc_level = work[(work["_folder"] == "") & (work["_subfolder"] == "")]
     write_points(kml, doc_level, indent="    ")
 
-    # Rows with no main folder but with subfolder: subfolder becomes document-level folder
     subfolder_only = work[(work["_folder"] == "") & (work["_subfolder"] != "")]
     for subfolder_name, sg in subfolder_only.groupby("_subfolder", sort=False):
         kml.write(kml_folder(subfolder_name, indent="    ").encode("utf-8"))
         write_points(kml, sg, indent="      ")
         kml.write(kml_folder_end(indent="    ").encode("utf-8"))
 
-    # Rows with main folder
     with_folder = work[work["_folder"] != ""]
     for folder_name, fg in with_folder.groupby("_folder", sort=False):
         kml.write(kml_folder(folder_name, indent="    ").encode("utf-8"))
 
-        # Directly under folder
         direct = fg[fg["_subfolder"] == ""]
         write_points(kml, direct, indent="      ")
 
-        # Nested subfolders
         nested = fg[fg["_subfolder"] != ""]
         for subfolder_name, sg in nested.groupby("_subfolder", sort=False):
             kml.write(kml_folder(subfolder_name, indent="      ").encode("utf-8"))
@@ -376,9 +363,9 @@ if convert_clicked and up:
                     ]
                     if c
                 ]
+
                 df = df[keep].copy()
 
-                # Remove fully blank rows from the template body
                 important_cols = [c for c in [col_name, col_lat, col_long, col_e, col_n] if c]
                 df = df[~df[important_cols].isna().all(axis=1)].copy()
 
@@ -386,12 +373,10 @@ if convert_clicked and up:
                     st.error("No filled rows found.")
                     st.stop()
 
-                # Numeric coercion
                 for c in [col_lat, col_long, col_e, col_n, col_z]:
                     if c and c in df.columns:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-                # Output frame
                 out = pd.DataFrame(index=df.index)
                 out["folder"] = df[col_folder] if col_folder and col_folder in df.columns else ""
                 out["subfolder"] = df[col_subfolder] if col_subfolder and col_subfolder in df.columns else ""
@@ -403,93 +388,98 @@ if convert_clicked and up:
 
                 out["elevation"] = df[col_z] if col_z and col_z in df.columns else np.nan
 
-                out["lat"] = np.nan
-                out["long"] = np.nan
+                out["lat"] = df[col_lat] if col_lat and col_lat in df.columns else np.nan
+                out["long"] = df[col_long] if col_long and col_long in df.columns else np.nan
                 out["E"] = df[col_e] if col_e and col_e in df.columns else np.nan
                 out["N"] = df[col_n] if col_n and col_n in df.columns else np.nan
 
+                out["validation_status"] = ""
                 out["input_type"] = ""
                 out["conversion_note"] = ""
 
-                # A) WGS84 geographic input: pass through directly
+                # Validate provided inputs
                 if col_lat and col_long:
-                    m_latlong = df[col_lat].notna() & df[col_long].notna()
+                    m_latlong_provided = df[col_lat].notna() & df[col_long].notna()
+                    m_latlong_valid = m_latlong_provided & ~invalid_ll(df[col_long], df[col_lat])
+                    m_latlong_invalid = m_latlong_provided & invalid_ll(df[col_long], df[col_lat])
+                else:
+                    m_latlong_provided = pd.Series(False, index=df.index)
+                    m_latlong_valid = pd.Series(False, index=df.index)
+                    m_latlong_invalid = pd.Series(False, index=df.index)
 
-                    out.loc[m_latlong, "lat"] = df.loc[m_latlong, col_lat]
-                    out.loc[m_latlong, "long"] = df.loc[m_latlong, col_long]
-                    out.loc[m_latlong, "input_type"] = "wgs84_geographic"
-                    out.loc[m_latlong, "conversion_note"] = "plotted_from_lat_long"
-
-                # B) WGS84 UTM 17T / Zone 17N input: convert E/N to WGS84 geographic
                 if col_e and col_n:
-                    m_utm = df[col_e].notna() & df[col_n].notna()
+                    m_utm_provided = df[col_e].notna() & df[col_n].notna()
+                    m_utm_valid = m_utm_provided & ~invalid_wgs84_utm17(df[col_e], df[col_n])
+                    m_utm_invalid = m_utm_provided & invalid_wgs84_utm17(df[col_e], df[col_n])
+                else:
+                    m_utm_provided = pd.Series(False, index=df.index)
+                    m_utm_valid = pd.Series(False, index=df.index)
+                    m_utm_invalid = pd.Series(False, index=df.index)
 
-                    # If both lat/long and E/N are present, use lat/long.
-                    if col_lat and col_long:
-                        m_both = (
-                            df[col_lat].notna()
-                            & df[col_long].notna()
-                            & df[col_e].notna()
-                            & df[col_n].notna()
-                        )
+                # A) Valid WGS84 geographic input: pass through directly
+                out.loc[m_latlong_valid, "input_type"] = "wgs84_geographic"
+                add_note(out, m_latlong_valid, "plotted_from_lat_long")
 
-                        if m_both.any():
-                            out.loc[m_both, "input_type"] = "wgs84_geographic_preferred"
-                            out.loc[m_both, "conversion_note"] = "both_lat_long_and_utm_present_lat_long_used"
+                # B) Rows with both valid lat/long and valid E/N: lat/long is used for KMZ
+                m_both_valid = m_latlong_valid & m_utm_valid
+                out.loc[m_both_valid, "input_type"] = "wgs84_geographic_preferred"
+                add_note(out, m_both_valid, "both_lat_long_and_utm_present_lat_long_used")
 
-                        m_utm = m_utm & ~m_both
+                # C) Valid UTM, but no valid lat/long: convert E/N to WGS84 geographic
+                m_utm_to_geo = m_utm_valid & ~m_latlong_valid
 
-                    if m_utm.any():
-                        utm_idx = df.index[m_utm]
-                        bad_utm = invalid_wgs84_utm17(
-                            df.loc[utm_idx, col_e],
-                            df.loc[utm_idx, col_n],
-                        )
+                if m_utm_to_geo.any():
+                    tr = transformer_wgs84_utm17_to_wgs84_geo()
+                    long_vals, lat_vals = tr.transform(
+                        df.loc[m_utm_to_geo, col_e].to_numpy(),
+                        df.loc[m_utm_to_geo, col_n].to_numpy(),
+                    )
 
-                        if bad_utm.any():
-                            st.warning(
-                                f"{bad_utm.sum()} UTM row(s) failed WGS84 UTM 17T range checks and were skipped."
-                            )
+                    out.loc[m_utm_to_geo, "long"] = long_vals
+                    out.loc[m_utm_to_geo, "lat"] = lat_vals
+                    out.loc[m_utm_to_geo, "input_type"] = "wgs84_utm_17t"
+                    add_note(out, m_utm_to_geo, "converted_from_wgs84_utm_zone_17n")
 
-                        good_utm_idx = bad_utm.index[~bad_utm.to_numpy()]
+                # Input problems that should remain visible in Validation Excel
+                add_note(out, m_latlong_invalid, "invalid_lat_long_failed_range_check")
+                add_note(out, m_utm_invalid, "invalid_utm_e_n_failed_range_check")
 
-                        if len(good_utm_idx) > 0:
-                            tr = transformer_wgs84_utm17_to_wgs84_geo()
-                            long_vals, lat_vals = tr.transform(
-                                df.loc[good_utm_idx, col_e].to_numpy(),
-                                df.loc[good_utm_idx, col_n].to_numpy(),
-                            )
-
-                            out.loc[good_utm_idx, "long"] = long_vals
-                            out.loc[good_utm_idx, "lat"] = lat_vals
-                            out.loc[good_utm_idx, "input_type"] = "wgs84_utm_17t"
-                            out.loc[good_utm_idx, "conversion_note"] = "converted_from_wgs84_utm_zone_17n"
-
-                # Final coordinate validation
+                # Final coordinate validation for KMZ export
                 bad_final = invalid_ll(out["long"], out["lat"])
+                good_final = ~bad_final
+
+                out.loc[good_final, "validation_status"] = "OK - included in KMZ"
+                out.loc[bad_final, "validation_status"] = "ERROR - skipped from KMZ"
+                add_note(out, bad_final, "missing_or_invalid_final_wgs84_coordinates")
+
+                failed_utm_no_latlong = m_utm_invalid & ~m_latlong_valid
+                if failed_utm_no_latlong.any():
+                    st.warning(
+                        f"{failed_utm_no_latlong.sum()} UTM row(s) failed WGS84 UTM 17T range checks and are shown in the Validation Excel."
+                    )
 
                 if bad_final.any():
                     st.warning(
-                        f"{bad_final.sum()} row(s) had invalid or missing final WGS84 coordinates and were skipped."
+                        f"{bad_final.sum()} row(s) had invalid or missing final WGS84 coordinates and are shown in the Validation Excel."
                     )
-                    out = out[~bad_final].copy()
 
-                if out.empty:
-                    st.error("No valid coordinates were found after processing.")
-                else:
-                    # Round validation output
-                    out["lat"] = pd.to_numeric(out["lat"], errors="coerce").round(9)
-                    out["long"] = pd.to_numeric(out["long"], errors="coerce").round(9)
-                    out["E"] = pd.to_numeric(out["E"], errors="coerce").round(3)
-                    out["N"] = pd.to_numeric(out["N"], errors="coerce").round(3)
-                    out["elevation"] = pd.to_numeric(out["elevation"], errors="coerce")
+                # Round validation output, but keep invalid/error rows
+                out["lat"] = pd.to_numeric(out["lat"], errors="coerce").round(9)
+                out["long"] = pd.to_numeric(out["long"], errors="coerce").round(9)
+                out["E"] = pd.to_numeric(out["E"], errors="coerce").round(3)
+                out["N"] = pd.to_numeric(out["N"], errors="coerce").round(3)
+                out["elevation"] = pd.to_numeric(out["elevation"], errors="coerce")
 
-                    base = Path(up.name).stem
+                base = Path(up.name).stem
 
-                    # KMZ: Google Earth WGS84 geographic points
+                # KMZ only uses valid rows
+                kmz_rows = out[out["validation_status"] == "OK - included in KMZ"].copy()
+
+                kmz_bytes = None
+                if not kmz_rows.empty:
                     kmz_bytes = build_kmz_points(
-                        f"{base} — WGS84 Geographic",
-                        out[[
+                        f"{base}",
+                        kmz_rows[[
                             "folder",
                             "subfolder",
                             "feature_name",
@@ -498,45 +488,47 @@ if convert_clicked and up:
                             "elevation",
                         ]],
                     )
+                else:
+                    st.warning("No valid rows were available for KMZ export. Validation Excel only.")
 
-                    # Validation Excel - E before N
-                    valid_cols = [
-                        "folder",
-                        "subfolder",
-                        "feature_name",
-                        "lat",
-                        "long",
-                        "E",
-                        "N",
-                        "elevation",
-                        "input_type",
-                        "conversion_note",
-                    ]
+                # Validation Excel includes valid + error rows
+                valid_cols = [
+                    "folder",
+                    "subfolder",
+                    "feature_name",
+                    "lat",
+                    "long",
+                    "E",
+                    "N",
+                    "elevation",
+                    "validation_status",
+                    "input_type",
+                    "conversion_note",
+                ]
 
-                    out_valid = out[valid_cols].copy()
+                out_valid = out[valid_cols].copy()
 
-                    xbuf = BytesIO()
-                    with pd.ExcelWriter(xbuf, engine="openpyxl") as xw:
-                        readme = pd.DataFrame(
-                            {
-                                "Validation": [
-                                    "All exported KMZ coordinates are WGS84 Geographic longitude/latitude.",
-                                    "Rows with lat/long are plotted directly.",
-                                    "Rows with E/N are interpreted as WGS84 UTM 17T / UTM Zone 17N and converted to WGS84 Geographic.",
-                                    "If both lat/long and E/N are provided on the same row, lat/long is used.",
-                                    "No NAD27, NAD83, NTv2 grid, or GTAA survey transformation is applied in this tool.",
-                                ]
-                            }
-                        )
-                        readme.to_excel(xw, index=False, sheet_name="README")
-                        out_valid.to_excel(xw, index=False, sheet_name="Validation")
+                xbuf = BytesIO()
+                with pd.ExcelWriter(xbuf, engine="openpyxl") as xw:
+                    readme = pd.DataFrame(
+                        {
+                            "Validation": [
+                                "All valid KMZ export coordinates are WGS84 Geographic longitude/latitude.",
+                                "Rows with valid lat/long are plotted directly.",
+                                "Rows with valid E/N and missing/invalid lat/long are interpreted as WGS84 UTM 17T / UTM Zone 17N and converted to WGS84 Geographic.",
+                                "Rows with invalid or missing final WGS84 coordinates are skipped from the KMZ but kept in this Validation Excel.",
+                                "No NAD27, NAD83, NTv2 grid, or GTAA survey transformation is applied in this tool.",
+                            ]
+                        }
+                    )
+                    readme.to_excel(xw, index=False, sheet_name="README")
+                    out_valid.to_excel(xw, index=False, sheet_name="Validation")
 
-                    xbuf.seek(0)
+                xbuf.seek(0)
 
-                    # Persist in session so both downloads remain available
-                    st.session_state.kmz_bytes = kmz_bytes
-                    st.session_state.validation_xlsx = xbuf.getvalue()
-                    st.session_state.base_name = base
+                st.session_state.kmz_bytes = kmz_bytes
+                st.session_state.validation_xlsx = xbuf.getvalue()
+                st.session_state.base_name = base
 
     except Exception as e:
         st.error("Conversion failed.")
@@ -546,16 +538,20 @@ if convert_clicked and up:
 # -------------------------------------------------------------------
 # Downloads
 # -------------------------------------------------------------------
-if st.session_state.kmz_bytes and st.session_state.validation_xlsx:
-    st.success("KMZ and Validation Excel are ready.")
+if st.session_state.validation_xlsx:
+    if st.session_state.kmz_bytes:
+        st.success("KMZ and Validation Excel are ready.")
+    else:
+        st.success("Validation Excel is ready. No valid KMZ rows were available.")
 
-    st.download_button(
-        "Download KMZ",
-        data=st.session_state.kmz_bytes,
-        file_name=f"{st.session_state.base_name}.kmz",
-        mime="application/vnd.google-earth.kmz",
-        key="dl_kmz",
-    )
+    if st.session_state.kmz_bytes:
+        st.download_button(
+            "Download KMZ",
+            data=st.session_state.kmz_bytes,
+            file_name=f"{st.session_state.base_name}.kmz",
+            mime="application/vnd.google-earth.kmz",
+            key="dl_kmz",
+        )
 
     st.download_button(
         "Download Validation Excel",
