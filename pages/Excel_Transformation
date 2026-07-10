@@ -1,3 +1,4 @@
+# Page is offline due to conversion inaccuracies between NAD83 and NAD27 (we need the GTAA adjustment, not NAD27 original; can only be properly done with transformation files from GTAA)
 # Excel Coordinate Transformation
 # Input rows may contain either NAD83 Geographic (lat/long) or NAD27 / UTM Zone 17N (N/E).
 # For each row:
