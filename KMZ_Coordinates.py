@@ -29,9 +29,7 @@ st.title("KMZ Coordinates to Excel")
 st.caption(
     """
     Upload a KMZ or KML file to extract the native **WGS84 Geographic** coordinates used by Google Earth.  
-    Output includes `feature_name`, `vertex_index`, `lat`, `long`, **WGS84 UTM 17T** `E`, `N`, and elevation when available.  
-
-    **Note:** KML coordinate order is longitude, latitude, elevation. This tool exports it as latitude, longitude for easier spreadsheet review.
+    Output includes `feature_name`, `vertex_index`,**WGS84 Geographic** `lat`, `long`, **WGS84 UTM 17T** `E`, `N`, and elevation when available.  
     """
 )
 
