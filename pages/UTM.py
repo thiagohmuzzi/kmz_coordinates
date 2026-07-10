@@ -32,11 +32,9 @@ st.title("Excel Coordinate Converter")
 
 st.caption(
     """
-    Upload the Excel template.  
+    Input coordinates to the Excel template provided.
     Rows may contain either **WGS84 Geographic** (`lat`, `long`) or **WGS84 UTM 17T** (`E`, `N`).  
-
-    This tool fills the missing coordinate system only.  
-    No NAD27, NAD83, NTv2 grid, or GTAA survey transformation is applied.
+    Output includes `feature_name`,`lat`, `long`,`E` and `N` (the missing pair is filled out).
     """
 )
 
@@ -455,7 +453,7 @@ if st.session_state.xlsx_bytes:
     st.download_button(
         "Download completed Excel",
         data=st.session_state.xlsx_bytes,
-        file_name=f"{st.session_state.base_name}_completed.xlsx",
+        file_name=f"{st.session_state.base_name}_converted.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="dl_xlsx",
     )
