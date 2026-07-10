@@ -27,8 +27,8 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 # -------------------------------------------------------------------
 # Streamlit page
 # -------------------------------------------------------------------
-st.set_page_config(page_title="Excel Coordinate Converter", page_icon="🔁")
-st.title("Excel Coordinate Converter")
+st.set_page_config(page_title="WGS UTM to Geographic Converter", page_icon="🔁")
+st.title("WGS UTM to Geographic Converter")
 
 st.caption(
     """  
