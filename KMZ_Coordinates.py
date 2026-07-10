@@ -1,18 +1,20 @@
 # KMZ/KML → Excel
-# Extracts native Google Earth WGS84 Geographic coordinates only.
+# Extracts native Google Earth WGS84 Geographic coordinates and adds WGS84 UTM 17T E/N.
 #
 # Output:
-#   feature_name, vertex_index, lat, long, elevation (optional)
+#   feature_name, vertex_index, lat, long, E, N, elevation (m)
 #
-# No NAD27, no NAD83, no NTv2 grids, no coordinate transformation.
+# No NAD27, no NAD83, no NTv2 grids, no GTAA survey transformation.
 
 import zipfile
 import xml.etree.ElementTree as ET
 from io import BytesIO
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
+from pyproj import Transformer
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -27,7 +29,7 @@ st.title("KMZ Coordinates to Excel")
 st.caption(
     """
     Upload a KMZ or KML file to extract the native **WGS84 Geographic** coordinates used by Google Earth.  
-    Output includes `feature_name`, `vertex_index`, `lat`, `long`, and optional elevation.  
+    Output includes `feature_name`, `vertex_index`, `lat`, `long`, **WGS84 UTM 17T** `E`, `N`, and elevation when available.  
 
     **Note:** KML coordinate order is longitude, latitude, elevation. This tool exports it as latitude, longitude for easier spreadsheet review.
     """
@@ -39,6 +41,14 @@ up = st.file_uploader("Upload KMZ or KML", type=["kmz", "kml"])
 # -------------------------------------------------------------------
 # Helpers
 # -------------------------------------------------------------------
+def transformer_wgs84_geo_to_utm17() -> Transformer:
+    """
+    WGS84 Geographic degrees -> WGS84 / UTM Zone 17N meters.
+    Google Earth may display this as UTM 17T in the Toronto/Pearson area.
+    """
+    return Transformer.from_crs("EPSG:4326", "EPSG:32617", always_xy=True)
+
+
 def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
     """
     Parse KML bytes and return:
@@ -101,7 +111,6 @@ def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # Final output order
     df = df[[
         "feature_name",
         "vertex_index",
@@ -110,11 +119,57 @@ def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
         "elevation",
     ]].copy()
 
-    df["lat"] = pd.to_numeric(df["lat"], errors="coerce").round(9)
-    df["long"] = pd.to_numeric(df["long"], errors="coerce").round(9)
-    df["elevation"] = pd.to_numeric(df["elevation"], errors="coerce").round(2)
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["long"] = pd.to_numeric(df["long"], errors="coerce")
+    df["elevation"] = pd.to_numeric(df["elevation"], errors="coerce")
+
+    # Remove invalid geographic rows
+    valid = (
+        df["lat"].between(-90, 90)
+        & df["long"].between(-180, 180)
+        & df["lat"].notna()
+        & df["long"].notna()
+    )
+    df = df[valid].copy()
+
+    if df.empty:
+        return df
+
+    # Add WGS84 UTM 17T / Zone 17N E/N
+    tr = transformer_wgs84_geo_to_utm17()
+    e_vals, n_vals = tr.transform(
+        df["long"].to_numpy(),
+        df["lat"].to_numpy(),
+    )
+
+    df["E"] = pd.Series(e_vals, index=df.index, dtype="float64")
+    df["N"] = pd.Series(n_vals, index=df.index, dtype="float64")
+
+    # Round output values
+    df["lat"] = df["lat"].round(9)
+    df["long"] = df["long"].round(9)
+    df["E"] = df["E"].round(3)
+    df["N"] = df["N"].round(3)
+    df["elevation"] = df["elevation"].round(2)
+
+    # Final output order
+    df = df[[
+        "feature_name",
+        "vertex_index",
+        "lat",
+        "long",
+        "E",
+        "N",
+        "elevation",
+    ]].copy()
 
     return df
+
+
+def blank_if_nan(value):
+    if pd.isna(value):
+        return None
+    return value
 
 
 def build_output_excel(df: pd.DataFrame) -> bytes:
@@ -122,9 +177,11 @@ def build_output_excel(df: pd.DataFrame) -> bytes:
     ws = wb.active
     ws.title = "Coordinates"
 
-    # Group header
+    # Group headers
     ws.merge_cells("C1:D1")
+    ws.merge_cells("E1:F1")
     ws["C1"] = "WGS84 Geographic"
+    ws["E1"] = "WGS84 UTM 17T"
 
     # Column headers
     headers = [
@@ -132,7 +189,9 @@ def build_output_excel(df: pd.DataFrame) -> bytes:
         "vertex_index",
         "lat",
         "long",
-        "elevation (optional)",
+        "E",
+        "N",
+        "elevation (m)",
     ]
 
     for col_idx, header in enumerate(headers, start=1):
@@ -142,15 +201,18 @@ def build_output_excel(df: pd.DataFrame) -> bytes:
     thin = Side(style="thin", color="808080")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    group_fill = PatternFill("solid", fgColor="EDEDED")
+    geo_fill = PatternFill("solid", fgColor="EDEDED")
+    utm_fill = PatternFill("solid", fgColor="EDEDED")
     header_fill = PatternFill("solid", fgColor="EDEDED")
 
-    ws["C1"].font = Font(bold=True)
-    ws["C1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws["C1"].fill = group_fill
-    ws["C1"].border = border
+    for cell_ref, fill in [("C1", geo_fill), ("E1", utm_fill)]:
+        cell = ws[cell_ref]
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.fill = fill
+        cell.border = border
 
-    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=5):
+    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=7):
         for cell in row:
             cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = border
@@ -163,9 +225,11 @@ def build_output_excel(df: pd.DataFrame) -> bytes:
     for row_idx, record in enumerate(df.itertuples(index=False), start=3):
         ws.cell(row=row_idx, column=1).value = record.feature_name
         ws.cell(row=row_idx, column=2).value = record.vertex_index
-        ws.cell(row=row_idx, column=3).value = record.lat
-        ws.cell(row=row_idx, column=4).value = record.long
-        ws.cell(row=row_idx, column=5).value = record.elevation
+        ws.cell(row=row_idx, column=3).value = blank_if_nan(record.lat)
+        ws.cell(row=row_idx, column=4).value = blank_if_nan(record.long)
+        ws.cell(row=row_idx, column=5).value = blank_if_nan(record.E)
+        ws.cell(row=row_idx, column=6).value = blank_if_nan(record.N)
+        ws.cell(row=row_idx, column=7).value = blank_if_nan(record.elevation)
 
     # Column widths
     widths = {
@@ -173,7 +237,9 @@ def build_output_excel(df: pd.DataFrame) -> bytes:
         "B": 14,  # vertex_index
         "C": 16,  # lat
         "D": 16,  # long
-        "E": 22,  # elevation optional
+        "E": 16,  # E
+        "F": 16,  # N
+        "G": 16,  # elevation
     }
 
     for col, width in widths.items():
@@ -187,7 +253,9 @@ def build_output_excel(df: pd.DataFrame) -> bytes:
     for row in range(3, ws.max_row + 1):
         ws[f"C{row}"].number_format = "0.000000000"
         ws[f"D{row}"].number_format = "0.000000000"
-        ws[f"E{row}"].number_format = "0.00"
+        ws[f"E{row}"].number_format = "0.000"
+        ws[f"F{row}"].number_format = "0.000"
+        ws[f"G{row}"].number_format = "0.00"
 
     buf = BytesIO()
     wb.save(buf)
@@ -219,7 +287,6 @@ if extract_clicked and up:
                     st.error("No KML file found inside the KMZ.")
                     st.stop()
 
-                # Usually doc.kml, otherwise first KML found
                 kml_name = "doc.kml" if "doc.kml" in kml_files else kml_files[0]
                 kml_bytes = z.read(kml_name)
         else:
@@ -228,7 +295,7 @@ if extract_clicked and up:
         df = parse_kml_bytes(kml_bytes)
 
         if df.empty:
-            st.error("No coordinates found in the KMZ/KML.")
+            st.error("No valid coordinates found in the KMZ/KML.")
             st.stop()
 
         base = Path(up.name).stem
