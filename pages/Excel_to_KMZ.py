@@ -1,7 +1,7 @@
 # Excel → KMZ
 # Input rows may contain either:
 #   - WGS84 Geographic: lat / long
-#   - WGS84 UTM Zone 17N: N / E
+#   - WGS84 UTM Zone 17N: E / N
 #
 # Template displays "WGS84 UTM 17T" because Google Earth may show the latitude band as 17T.
 # For pyproj, conversion is handled as WGS84 / UTM Zone 17N = EPSG:32617.
@@ -31,7 +31,7 @@ st.title("Excel to KMZ")
 st.caption(
     """
     Input coordinates to the Excel template provided.  
-    Rows may contain either **WGS84 Geographic** (`lat`, `long`) or **WGS84 UTM 17T** (`N`, `E`).  
+    Rows may contain either **WGS84 Geographic** (`lat`, `long`) or **WGS84 UTM 17T** (`E`, `N`).  
     Folder and subfolder information are optional and can be used to nest features in Google Earth. Elevation is optional.  
 
     **Note:** Visually confirm the geographic placement of points in the new file.
@@ -53,15 +53,15 @@ def build_excel_template() -> bytes:
     ws["D1"] = "WGS84 Geographic"
     ws["F1"] = "WGS84 UTM 17T"
 
-    # Column headers
+    # Column headers - E before N
     headers = [
         "folder",
         "subfolder",
         "feature_name",
         "lat",
         "long",
-        "N",
         "E",
+        "N",
         "elevation (optional)",
     ]
 
@@ -72,14 +72,15 @@ def build_excel_template() -> bytes:
     thin = Side(style="thin", color="808080")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    group_fill = PatternFill("solid", fgColor="EDEDED")
+    geo_fill = PatternFill("solid", fgColor="EDEDED")  # D1:E1
+    utm_fill = PatternFill("solid", fgColor="EDEDED")  # F1:G1
     header_fill = PatternFill("solid", fgColor="EDEDED")
 
-    for cell_ref in ["D1", "F1"]:
+    for cell_ref, fill in [("D1", geo_fill), ("F1", utm_fill)]:
         cell = ws[cell_ref]
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.fill = group_fill
+        cell.fill = fill
         cell.border = border
 
     for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=8):
@@ -98,8 +99,8 @@ def build_excel_template() -> bytes:
         "C": 26,  # feature_name
         "D": 16,  # lat
         "E": 16,  # long
-        "F": 16,  # N
-        "G": 16,  # E
+        "F": 16,  # E
+        "G": 16,  # N
         "H": 22,  # elevation optional
     }
 
@@ -112,11 +113,11 @@ def build_excel_template() -> bytes:
 
     # Number formats for user-entry area
     for row in range(3, 1003):
-        ws[f"D{row}"].number_format = "0.000000000"
-        ws[f"E{row}"].number_format = "0.000000000"
-        ws[f"F{row}"].number_format = "0.000"
-        ws[f"G{row}"].number_format = "0.000"
-        ws[f"H{row}"].number_format = "0.00"
+        ws[f"D{row}"].number_format = "0.000000000"  # lat
+        ws[f"E{row}"].number_format = "0.000000000"  # long
+        ws[f"F{row}"].number_format = "0.000"        # E
+        ws[f"G{row}"].number_format = "0.000"        # N
+        ws[f"H{row}"].number_format = "0.00"         # elevation
 
     buf = BytesIO()
     wb.save(buf)
@@ -175,14 +176,13 @@ def read_excel_template_aware(file_bytes: bytes) -> pd.DataFrame:
             and pick(temp, ["long", "lon", "longitude"]) is not None
         )
         has_utm = (
-            pick(temp, ["n", "northing", "utm_n", "utm_northing", "y"]) is not None
-            and pick(temp, ["e", "easting", "utm_e", "utm_easting", "x"]) is not None
+            pick(temp, ["e", "easting", "utm_e", "utm_easting", "x"]) is not None
+            and pick(temp, ["n", "northing", "utm_n", "utm_northing", "y"]) is not None
         )
 
         if has_name and (has_ll or has_utm):
             return temp
 
-    # Return row-2 version anyway so error messages are based on expected template
     return normalize_columns(pd.read_excel(BytesIO(file_bytes), header=1))
 
 
@@ -342,8 +342,8 @@ if convert_clicked and up:
             col_name = pick(df, ["feature_name", "name", "label", "id", "title"])
             col_lat = pick(df, ["lat", "latitude"])
             col_long = pick(df, ["long", "lon", "longitude"])
-            col_n = pick(df, ["n", "northing", "utm_n", "utm_northing", "y"])
             col_e = pick(df, ["e", "easting", "utm_e", "utm_easting", "x"])
+            col_n = pick(df, ["n", "northing", "utm_n", "utm_northing", "y"])
             col_z = pick(
                 df,
                 [
@@ -360,8 +360,8 @@ if convert_clicked and up:
 
             if col_name is None:
                 st.error("Missing required column: feature_name")
-            elif not ((col_lat and col_long) or (col_n and col_e)):
-                st.error("Missing coordinate columns. Provide either lat/long or N/E.")
+            elif not ((col_lat and col_long) or (col_e and col_n)):
+                st.error("Missing coordinate columns. Provide either lat/long or E/N.")
             else:
                 keep = [
                     c for c in [
@@ -370,8 +370,8 @@ if convert_clicked and up:
                         col_name,
                         col_lat,
                         col_long,
-                        col_n,
                         col_e,
+                        col_n,
                         col_z,
                     ]
                     if c
@@ -379,7 +379,7 @@ if convert_clicked and up:
                 df = df[keep].copy()
 
                 # Remove fully blank rows from the template body
-                important_cols = [c for c in [col_name, col_lat, col_long, col_n, col_e] if c]
+                important_cols = [c for c in [col_name, col_lat, col_long, col_e, col_n] if c]
                 df = df[~df[important_cols].isna().all(axis=1)].copy()
 
                 if df.empty:
@@ -387,7 +387,7 @@ if convert_clicked and up:
                     st.stop()
 
                 # Numeric coercion
-                for c in [col_lat, col_long, col_n, col_e, col_z]:
+                for c in [col_lat, col_long, col_e, col_n, col_z]:
                     if c and c in df.columns:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
@@ -405,8 +405,8 @@ if convert_clicked and up:
 
                 out["lat"] = np.nan
                 out["long"] = np.nan
-                out["N"] = df[col_n] if col_n and col_n in df.columns else np.nan
                 out["E"] = df[col_e] if col_e and col_e in df.columns else np.nan
+                out["N"] = df[col_n] if col_n and col_n in df.columns else np.nan
 
                 out["input_type"] = ""
                 out["conversion_note"] = ""
@@ -420,17 +420,17 @@ if convert_clicked and up:
                     out.loc[m_latlong, "input_type"] = "wgs84_geographic"
                     out.loc[m_latlong, "conversion_note"] = "plotted_from_lat_long"
 
-                # B) WGS84 UTM 17T / Zone 17N input: convert to WGS84 geographic
-                if col_n and col_e:
-                    m_utm = df[col_n].notna() & df[col_e].notna()
+                # B) WGS84 UTM 17T / Zone 17N input: convert E/N to WGS84 geographic
+                if col_e and col_n:
+                    m_utm = df[col_e].notna() & df[col_n].notna()
 
-                    # If both lat/long and N/E are present, use lat/long.
+                    # If both lat/long and E/N are present, use lat/long.
                     if col_lat and col_long:
                         m_both = (
                             df[col_lat].notna()
                             & df[col_long].notna()
-                            & df[col_n].notna()
                             & df[col_e].notna()
+                            & df[col_n].notna()
                         )
 
                         if m_both.any():
@@ -480,8 +480,8 @@ if convert_clicked and up:
                     # Round validation output
                     out["lat"] = pd.to_numeric(out["lat"], errors="coerce").round(9)
                     out["long"] = pd.to_numeric(out["long"], errors="coerce").round(9)
-                    out["N"] = pd.to_numeric(out["N"], errors="coerce").round(3)
                     out["E"] = pd.to_numeric(out["E"], errors="coerce").round(3)
+                    out["N"] = pd.to_numeric(out["N"], errors="coerce").round(3)
                     out["elevation"] = pd.to_numeric(out["elevation"], errors="coerce")
 
                     base = Path(up.name).stem
@@ -499,15 +499,15 @@ if convert_clicked and up:
                         ]],
                     )
 
-                    # Validation Excel
+                    # Validation Excel - E before N
                     valid_cols = [
                         "folder",
                         "subfolder",
                         "feature_name",
                         "lat",
                         "long",
-                        "N",
                         "E",
+                        "N",
                         "elevation",
                         "input_type",
                         "conversion_note",
@@ -522,8 +522,8 @@ if convert_clicked and up:
                                 "Validation": [
                                     "All exported KMZ coordinates are WGS84 Geographic longitude/latitude.",
                                     "Rows with lat/long are plotted directly.",
-                                    "Rows with N/E are interpreted as WGS84 UTM 17T / UTM Zone 17N and converted to WGS84 Geographic.",
-                                    "If both lat/long and N/E are provided on the same row, lat/long is used.",
+                                    "Rows with E/N are interpreted as WGS84 UTM 17T / UTM Zone 17N and converted to WGS84 Geographic.",
+                                    "If both lat/long and E/N are provided on the same row, lat/long is used.",
                                     "No NAD27, NAD83, NTv2 grid, or GTAA survey transformation is applied in this tool.",
                                 ]
                             }
