@@ -32,6 +32,7 @@ st.title("Excel Coordinate Converter")
 
 st.caption(
     """  
+    Input coordinates to the Excel template provided.
     Rows may contain either **WGS84 Geographic** (`lat`, `long`) or **WGS84 UTM 17T** (`E`, `N`).  
 
     This tool fills the missing coordinate system only.  
