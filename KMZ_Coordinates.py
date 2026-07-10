@@ -1,36 +1,35 @@
-import streamlit as st
+# KMZ/KML → Excel
+# Extracts native Google Earth WGS84 Geographic coordinates only.
+#
+# Output:
+#   feature_name, vertex_index, lat, long, elevation (optional)
+#
+# No NAD27, no NAD83, no NTv2 grids, no coordinate transformation.
+
 import zipfile
 import xml.etree.ElementTree as ET
-import pandas as pd
-from pyproj import Transformer
 from io import BytesIO
-from openpyxl import Workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
-import os
 from pathlib import Path
-import numpy as np
+
+import pandas as pd
+import streamlit as st
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
 
 # -------------------------------------------------------------------
-# Paths and PROJ setup
-# -------------------------------------------------------------------
-THIS = Path(__file__).resolve()
-ROOT = THIS.parent  # KMZ_Coordinates.py lives in repo root
-
-TOR_GRID = ROOT / "TO27CSv1.gsb"   # default (Toronto grid)
-ON_GRID  = ROOT / "ON27CSv1.gsb"   # fallback (Ontario-wide)
-
-os.environ["PROJ_DATA"] = str(ROOT.resolve())
-os.environ["PROJ_NETWORK"] = "OFF"
-
-# -------------------------------------------------------------------
-# Streamlit UI
+# Streamlit page
 # -------------------------------------------------------------------
 st.set_page_config(page_title="KMZ Coordinates Extraction", page_icon="🧭")
-st.title("KMZ Coordinates to Excel – NAD83 Geographic / NAD27 UTM Zone 17N")
+st.title("KMZ Coordinates to Excel")
+
 st.caption(
     """
-    Extracts NAD83 Geographic coordinates (lat/long) and converts to NAD27 / UTM Zone 17N. \n
-    **Note:** Always confirm a few rows of the NAD 27 converted coordinates with the [NRCan NTv2 website](https://webapp.csrs-scrs.nrcan-rncan.gc.ca/geod/tools-outils/ntv2.php).
+    Upload a KMZ or KML file to extract the native **WGS84 Geographic** coordinates used by Google Earth.  
+    Output includes `feature_name`, `vertex_index`, `lat`, `long`, and optional elevation.  
+
+    **Note:** KML coordinate order is longitude, latitude, elevation. This tool exports it as latitude, longitude for easier spreadsheet review.
     """
 )
 
@@ -42,199 +41,229 @@ up = st.file_uploader("Upload KMZ or KML", type=["kmz", "kml"])
 # -------------------------------------------------------------------
 def parse_kml_bytes(kml_bytes: bytes) -> pd.DataFrame:
     """
-    Parse KML bytes and return DataFrame:
-    feature_name, vertex_index, lat, lon, elevation_m
+    Parse KML bytes and return:
+      feature_name, vertex_index, lat, long, elevation
+
+    For single-point placemarks, vertex_index is left blank.
+    For lines/polygons/multiple-coordinate placemarks, vertex_index is 1, 2, 3...
     """
     ns = {"kml": "http://www.opengis.net/kml/2.2"}
     root = ET.fromstring(kml_bytes)
+
     rows = []
+
     for pm in root.findall(".//kml:Placemark", ns):
         name_el = pm.find("kml:name", ns)
-        name = name_el.text if name_el is not None else "Unnamed"
+        name = name_el.text.strip() if name_el is not None and name_el.text else "Unnamed"
+
+        coords_for_pm = []
+
         for ct in pm.findall(".//kml:coordinates", ns):
             text = (ct.text or "").strip()
             if not text:
                 continue
-            for idx, c in enumerate(text.split()):
+
+            for c in text.split():
                 parts = c.split(",")
                 if len(parts) < 2:
                     continue
+
                 try:
-                    lon = float(parts[0])
-                    lat = float(parts[1])
+                    long_val = float(parts[0])
+                    lat_val = float(parts[1])
                 except ValueError:
                     continue
+
                 elev = None
-                if len(parts) > 2 and parts[2]:
+                if len(parts) > 2 and parts[2] != "":
                     try:
                         elev = float(parts[2])
                     except ValueError:
                         elev = None
-                rows.append(
+
+                coords_for_pm.append(
                     {
                         "feature_name": name,
-                        "vertex_index": idx + 1,
-                        "lat": lat,
-                        "lon": lon,
-                        "elevation_m": elev,
+                        "lat": lat_val,
+                        "long": long_val,
+                        "elevation": elev,
                     }
                 )
+
+        multiple_vertices = len(coords_for_pm) > 1
+
+        for idx, row in enumerate(coords_for_pm, start=1):
+            row["vertex_index"] = idx if multiple_vertices else ""
+            rows.append(row)
+
     df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.sort_values(["feature_name", "vertex_index"])
+
+    if df.empty:
+        return df
+
+    # Final output order
+    df = df[[
+        "feature_name",
+        "vertex_index",
+        "lat",
+        "long",
+        "elevation",
+    ]].copy()
+
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce").round(9)
+    df["long"] = pd.to_numeric(df["long"], errors="coerce").round(9)
+    df["elevation"] = pd.to_numeric(df["elevation"], errors="coerce").round(2)
+
     return df
 
 
-def transformer_nad83_ll_to_nad27_utm(grid_path: Path) -> Transformer:
-    """
-    NAD83 geographic (degrees) -> NAD27 / UTM Zone 17N (meters)
-    """
-    pipe = (
-        f"+proj=pipeline "
-        f"+step +proj=unitconvert +xy_in=deg +xy_out=rad "
-        f"+step +inv +proj=hgridshift +grids={grid_path} "
-        f"+step +proj=utm +zone=17 +datum=NAD27"
-    )
-    return Transformer.from_pipeline(pipe)
+def build_output_excel(df: pd.DataFrame) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Coordinates"
+
+    # Group header
+    ws.merge_cells("C1:D1")
+    ws["C1"] = "WGS84 Geographic"
+
+    # Column headers
+    headers = [
+        "feature_name",
+        "vertex_index",
+        "lat",
+        "long",
+        "elevation (optional)",
+    ]
+
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=2, column=col_idx).value = header
+
+    # Formatting similar to Excel_to_KMZ
+    thin = Side(style="thin", color="808080")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    group_fill = PatternFill("solid", fgColor="EDEDED")
+    header_fill = PatternFill("solid", fgColor="EDEDED")
+
+    ws["C1"].font = Font(bold=True)
+    ws["C1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["C1"].fill = group_fill
+    ws["C1"].border = border
+
+    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=5):
+        for cell in row:
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = border
+
+    for cell in ws[2]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+
+    # Data rows
+    for row_idx, record in enumerate(df.itertuples(index=False), start=3):
+        ws.cell(row=row_idx, column=1).value = record.feature_name
+        ws.cell(row=row_idx, column=2).value = record.vertex_index
+        ws.cell(row=row_idx, column=3).value = record.lat
+        ws.cell(row=row_idx, column=4).value = record.long
+        ws.cell(row=row_idx, column=5).value = record.elevation
+
+    # Column widths
+    widths = {
+        "A": 28,  # feature_name
+        "B": 14,  # vertex_index
+        "C": 16,  # lat
+        "D": 16,  # long
+        "E": 22,  # elevation optional
+    }
+
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 22
+    ws.freeze_panes = "A3"
+
+    # Number formats
+    for row in range(3, ws.max_row + 1):
+        ws[f"C{row}"].number_format = "0.000000000"
+        ws[f"D{row}"].number_format = "0.000000000"
+        ws[f"E{row}"].number_format = "0.00"
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 
-def invalid_utm(e: pd.Series, n: pd.Series) -> pd.Series:
-    """
-    Flag obviously invalid UTM17 coordinates.
-    """
-    m = e.isna() | n.isna()
-    m |= ~e.between(100_000, 900_000)
-    m |= ~n.between(4_000_000, 6_000_000)
-    return m
+# -------------------------------------------------------------------
+# Session persistence
+# -------------------------------------------------------------------
+for key in ("xlsx_bytes", "base_name"):
+    if key not in st.session_state:
+        st.session_state[key] = None
+
+extract_clicked = st.button("Extract coordinates") if up else False
 
 
 # -------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------
-if up and st.button("Convert"):
+if extract_clicked and up:
     try:
-        # Ensure grids exist
-        if not TOR_GRID.exists():
-            st.error(f"Toronto grid not found at: {TOR_GRID}")
-            st.stop()
-        if not ON_GRID.exists():
-            st.info(f"Ontario grid not found at: {ON_GRID}. Fallback will not be used.")
-
-        # Read KML bytes
+        # Read KML bytes from KMZ or KML
         if up.name.lower().endswith(".kmz"):
             with zipfile.ZipFile(up) as z:
-                kml_name = next(n for n in z.namelist() if n.lower().endswith(".kml"))
+                kml_files = [n for n in z.namelist() if n.lower().endswith(".kml")]
+
+                if not kml_files:
+                    st.error("No KML file found inside the KMZ.")
+                    st.stop()
+
+                # Usually doc.kml, otherwise first KML found
+                kml_name = "doc.kml" if "doc.kml" in kml_files else kml_files[0]
                 kml_bytes = z.read(kml_name)
         else:
             kml_bytes = up.read()
 
         df = parse_kml_bytes(kml_bytes)
+
         if df.empty:
-            st.error("No coordinates found in KML/KMZ.")
+            st.error("No coordinates found in the KMZ/KML.")
             st.stop()
 
-        # Round lat/long
-        df["lat"] = df["lat"].round(9)
-        df["lon"] = df["lon"].round(9)
+        base = Path(up.name).stem
+        xlsx_bytes = build_output_excel(df)
 
-        # ---- NAD83 → NAD27 / UTM 17N ----
-        t_tor = transformer_nad83_ll_to_nad27_utm(TOR_GRID)
-        E_tor, N_tor = t_tor.transform(df["lon"].to_numpy(), df["lat"].to_numpy())
-
-        E = pd.Series(E_tor, index=df.index, dtype="float64")
-        N = pd.Series(N_tor, index=df.index, dtype="float64")
-        grid_used = np.full(len(df), "TO27CSv1.gsb", dtype=object)
-
-        bad = invalid_utm(E, N)
-
-        if bad.any() and ON_GRID.exists():
-            t_on = transformer_nad83_ll_to_nad27_utm(ON_GRID)
-            E_on, N_on = t_on.transform(
-                df.loc[bad, "lon"].to_numpy(),
-                df.loc[bad, "lat"].to_numpy()
-            )
-            E.loc[bad] = E_on
-            N.loc[bad] = N_on
-
-            still_bad = invalid_utm(E.loc[bad], N.loc[bad])
-            grid_used[bad.values] = "ON27CSv1.gsb"
-
-            if still_bad.any():
-                idxs = still_bad[still_bad].index
-                grid_used[idxs] = "None"
-                st.warning(f"{still_bad.sum()} point(s) remain invalid after fallback.")
-
-            st.info(f"Applied fallback grid (ON27CSv1.gsb) for {bad.sum()} point(s).")
-
-        elif bad.any():
-            st.warning(
-                f"{bad.sum()} point(s) outside expected UTM17 bounds and Ontario grid "
-                "is not available – N/E may be invalid."
-            )
-
-        # Final N/E
-        df["N"] = N.round(3)
-        df["E"] = E.round(3)
-        df["grid_used"] = grid_used
-
-        # ----------------------------------------------------------------
-        # Excel output
-        # ----------------------------------------------------------------
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Coordinates"
-
-        ws.append([
-            "",
-            "",
-            "NAD83 Geographic",
-            "NAD83 Geographic",
-            "NAD27 / UTM Zone 17N",
-            "NAD27 / UTM Zone 17N",
-            "",
-            "",
-        ])
-
-        ws.append([
-            "feature_name",
-            "vertex_index",
-            "lat",
-            "lon",
-            "N",
-            "E",
-            "elevation_m",
-            "grid_used",
-        ])
-
-        out = df[[
-            "feature_name",
-            "vertex_index",
-            "lat",
-            "lon",
-            "N",
-            "E",
-            "elevation_m",
-            "grid_used",
-        ]].copy()
-
-        for r in dataframe_to_rows(out, index=False, header=False):
-            ws.append(r)
-
-        bio = BytesIO()
-        wb.save(bio)
-        bio.seek(0)
-
-        base = os.path.splitext(up.name)[0]
-        out_name = f"{base}_coordinates.xlsx"
-
-        st.success("Extraction and transformation complete.")
-        st.download_button(
-            "Download XLSX",
-            data=bio,
-            file_name=out_name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        st.session_state.xlsx_bytes = xlsx_bytes
+        st.session_state.base_name = base
 
     except Exception as e:
-        st.error("KMZ → Excel transformation failed.")
+        st.error("KMZ/KML coordinate extraction failed.")
         st.exception(e)
+
+
+# -------------------------------------------------------------------
+# Downloads
+# -------------------------------------------------------------------
+if st.session_state.xlsx_bytes:
+    st.success("Coordinates Excel is ready.")
+
+    st.download_button(
+        "Download Excel",
+        data=st.session_state.xlsx_bytes,
+        file_name=f"{st.session_state.base_name}_coordinates.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_xlsx",
+    )
+
+    def _queue_refresh():
+        for k in ("xlsx_bytes", "base_name"):
+            st.session_state.pop(k, None)
+        st.session_state["_do_rerun"] = True
+
+    st.button("Refresh / New extraction", on_click=_queue_refresh, type="secondary")
+
+
+if st.session_state.get("_do_rerun"):
+    st.session_state.pop("_do_rerun", None)
+    st.rerun()
