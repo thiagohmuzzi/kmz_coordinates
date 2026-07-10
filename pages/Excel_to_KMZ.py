@@ -552,7 +552,7 @@ if st.session_state.kmz_bytes and st.session_state.validation_xlsx:
     st.download_button(
         "Download KMZ",
         data=st.session_state.kmz_bytes,
-        file_name=f"{st.session_state.base_name}_WGS84.kmz",
+        file_name=f"{st.session_state.base_name}.kmz",
         mime="application/vnd.google-earth.kmz",
         key="dl_kmz",
     )
