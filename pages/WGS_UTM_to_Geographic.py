@@ -32,7 +32,8 @@ st.title("WGS UTM to Geographic Converter")
 
 st.caption(
     """
-    Input coordinates to the Excel template provided.
+    Input coordinates to the Excel template provided."""
+    """
     Rows may contain either **WGS84 Geographic** (`lat`, `long`) or **WGS84 UTM 17T** (`E`, `N`).  
     Output includes `feature_name`,`lat`, `long`,`E` and `N` (the missing pair is filled out).
     """
